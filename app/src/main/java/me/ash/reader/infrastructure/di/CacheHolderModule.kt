@@ -39,10 +39,8 @@ object CacheHolderModule {
         @ApplicationContext context: Context,
         @IODispatcher ioDispatcher: CoroutineDispatcher,
         rssHelper: RssHelper,
-        accountService: AccountService,
     ): ReaderCacheHelper = ReaderCacheHelper(
         context = context, ioDispatcher = ioDispatcher,
         rssHelper = rssHelper,
-        accountService = accountService,
     )
 }

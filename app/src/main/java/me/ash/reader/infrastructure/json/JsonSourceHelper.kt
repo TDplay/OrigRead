@@ -7,6 +7,7 @@ import com.rometools.rome.feed.synd.SyndFeedImpl
 import java.util.Date
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -14,6 +15,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.feed.FeedWithArticle
@@ -45,6 +48,12 @@ class JsonSourceHelper @Inject constructor(
         .callTimeout(JSON_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    /** 同一来源的旧绑定恢复和确认重绑串行，不限制不同来源的网络并发。 */
+    private val subscriptionLocks = ConcurrentHashMap<String, Mutex>()
+
+    /** 仅协调同一 feedId 的配置和网络快照，避免旧刷新覆盖刚确认的新绑定。 */
+    private fun subscriptionLock(feedId: String): Mutex = subscriptionLocks.computeIfAbsent(feedId) { Mutex() }
+
     /** 每条规则都验证真实响应，取消后不再尝试下一条规则。 */
     suspend fun probe(inputUrl: String): JsonSourceProbeResult? = withContext(ioDispatcher) {
         WordPressJsonRuleFactory.createFromEndpoint(inputUrl)?.let { directRule ->
@@ -65,25 +74,86 @@ class JsonSourceHelper @Inject constructor(
         }
     }
 
+    /** 已有来源修复展示所有真实通过的候选，由用户明确选择后再替换绑定。 */
+    suspend fun probeCandidates(inputUrl: String): List<JsonSourceProbeResult> = withContext(ioDispatcher) {
+        val imported = ruleRepository.findRules(inputUrl)
+        val builtIn = listOfNotNull(WordPressJsonRuleFactory.createFromEndpoint(inputUrl)) +
+            WordPressJsonRuleFactory.createCandidates(inputUrl)
+        (imported + builtIn).distinctBy(JsonRule::id).mapNotNull { rule ->
+            tryProbeRule(inputUrl, rule)?.copy(importedRule = rule in imported)
+        }
+    }
+
+    /** 重绑失败的补偿只作用于这个来源，避免恢复整个规则文件覆盖并发配置。 */
+    suspend fun replaceSubscription(request: JsonRebindRequest, updateSource: suspend () -> Unit) {
+        currentCoroutineContext().ensureActive()
+        subscriptionLock(request.feed.id).withLock {
+            currentCoroutineContext().ensureActive()
+            withContext(kotlinx.coroutines.NonCancellable + ioDispatcher) {
+                persistReplacement(request, updateSource)
+            }
+        }
+    }
+
+    /** 短提交区只包括规则文件和地址更新，不包含网络探测。 */
+    private suspend fun persistReplacement(request: JsonRebindRequest, updateSource: suspend () -> Unit) {
+        val previous = ruleRepository.subscriptionBinding(request.feed.id)
+        ruleRepository.bindSubscription(request.feed.id, request.sourcePageUrl, request.probe)
+        try {
+            updateSource()
+        } catch (error: Exception) {
+            // 绑定与来源地址属于一次确认；数据库失败恢复原绑定并完整暴露补偿异常。
+            try {
+                ruleRepository.restoreSubscriptionBinding(request.feed.id, previous)
+            } catch (restoreError: Exception) {
+                error.addSuppressed(restoreError)
+            }
+            throw error
+        }
+    }
+
     /** 来源绑定优先于旧订阅的唯一精确匹配，不能按域名猜测成功规则。 */
     suspend fun fetch(feed: Feed, preDate: Date = Date()): FeedWithArticle = withContext(ioDispatcher) {
-        val rule = ruleRepository.subscriptionRule(feed.id, feed.url)
-            ?: ruleRepository.findRuleForEndpoint(feed.url)
-            ?: WordPressJsonRuleFactory.createFromEndpoint(feed.url)
-            ?: error("未找到 ${feed.url} 对应的 JSON 来源规则")
-        val articles = executeRule(JsonExecutionRequest(feed.url, rule, feed, preDate))
-        FeedWithArticle(feed.copy(isNotification = feed.isNotification && articles.isNotEmpty()), articles)
+        subscriptionLock(feed.id).withLock {
+            val boundRule = ruleRepository.subscriptionRule(feed.id, feed.url)
+            val articles = if (boundRule != null) executeRule(JsonExecutionRequest(feed.url, boundRule, feed, preDate))
+                else fetchLegacySubscription(feed, preDate)
+            FeedWithArticle(feed.copy(isNotification = feed.isNotification && articles.isNotEmpty()), articles)
+        }
+    }
+
+    /** 无绑定旧来源用真实响应验证候选；唯一成功才保存，多个成功明确要求用户选择。 */
+    private suspend fun fetchLegacySubscription(feed: Feed, fetchedAt: Date): List<Article> {
+        val imported = ruleRepository.findRulesForEndpoint(feed.url)
+        val candidates = imported.ifEmpty { listOfNotNull(WordPressJsonRuleFactory.createFromEndpoint(feed.url)) }
+        require(candidates.isNotEmpty()) { "未找到 ${feed.url} 对应的 JSON 来源规则" }
+        val failures = mutableListOf<Exception>()
+        val successes = candidates.mapNotNull { rule ->
+            try {
+                rule to executeRule(JsonExecutionRequest(feed.url, rule, feed, fetchedAt))
+            } catch (error: CancellationException) {
+                // 恢复验证被取消后不能继续尝试其他规则或写入绑定。
+                throw error
+            } catch (error: Exception) {
+                // 仅在旧数据恢复阶段验证全部候选，失败原因保留日志和最终异常。
+                failures.add(error)
+                Timber.w(error, "旧 JSON 来源规则 [%s] 验证失败", rule.name)
+                null
+            }
+        }
+        if (successes.isEmpty()) throw IllegalStateException("JSON 来源规则均验证失败，请重新探测来源：${feed.url}")
+            .also { error -> failures.forEach(error::addSuppressed) }
+        require(successes.size == 1) { "JSON 来源匹配多条有效规则，请在来源设置重新探测并选择：${feed.url}" }
+        currentCoroutineContext().ensureActive()
+        val (rule, articles) = successes.single()
+        ruleRepository.bindSubscription(feed.id, feed.url,
+            JsonSourceProbeResult(rule, feed.url, articles.toSyndFeed(rule.name, feed.url), rule in imported))
+        return articles
     }
 
     /** 探测阶段和同步阶段共用同一执行入口，保证保存后不会换一种解析方式。 */
     private suspend fun probeRule(inputUrl: String, rule: JsonRule): JsonSourceProbeResult {
-        val sourceUrl =
-            if (rule.sourceKind == JsonSourceKind.API) {
-                ruleRepository.resolveEndpoint(inputUrl, rule.endpoint)
-            } else {
-                // 内嵌 JSON 属于当前页面；endpoint="." 仅用于保持规则格式统一。
-                inputUrl
-            }
+        val sourceUrl = rule.requestEndpoint(inputUrl, ruleRepository::resolveEndpoint)
         val articles = executeRule(JsonExecutionRequest(sourceUrl, rule, temporaryFeed(rule.name, sourceUrl), Date()))
         return JsonSourceProbeResult(rule, sourceUrl, articles.toSyndFeed(rule.name, inputUrl))
     }

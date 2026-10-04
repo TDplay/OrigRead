@@ -167,6 +167,10 @@ interface FeedDao {
 
     @Update suspend fun update(vararg feed: Feed)
 
+    /** JSON 原地修复只替换请求地址，保留来源偏好、分组和所有文章关联。 */
+    @Query("UPDATE feed SET url = :url WHERE id = :feedId")
+    suspend fun updateSourceUrl(feedId: String, url: String): Int
+
     @Delete suspend fun delete(vararg feed: Feed)
 
     @Insert suspend fun insertAll(feeds: List<Feed>)

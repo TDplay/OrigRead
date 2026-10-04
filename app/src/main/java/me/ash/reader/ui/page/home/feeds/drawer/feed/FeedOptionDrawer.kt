@@ -185,9 +185,8 @@ fun FeedOptionDrawer(
                     )
                 } else if (feedOptionUiState.jsonParserDialogVisible) {
                     JsonParserPanel(
-                        configuredRules = feedOptionUiState.jsonConfiguredRules,
-                        onToggle = feedOptionViewModel::setJsonRuleEnabled,
-                        onBack = feedOptionViewModel::hideJsonParserDialog,
+                        state = feedOptionUiState,
+                        viewModel = feedOptionViewModel,
                     )
                 } else {
                     Column(
@@ -357,69 +356,6 @@ fun FeedOptionDrawer(
         }
     )
 
-}
-
-@Composable
-private fun JsonParserPanel(
-    configuredRules: List<JsonRule>,
-    onToggle: (JsonRule, Boolean) -> Unit,
-    onBack: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(text = stringResource(R.string.json_parser_title), style = MaterialTheme.typography.titleLarge)
-            IconButton(onClick = onBack) {
-                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.cancel))
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.json_parser_desc),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.outline,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        if (configuredRules.isEmpty()) {
-            WebsiteParserEmptyState(stringResource(R.string.json_parser_no_rules))
-        } else {
-            LazyColumn {
-                items(configuredRules, key = { it.id }) { rule ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        color = if (rule.enabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(18.dp),
-                        tonalElevation = if (rule.enabled) 2.dp else 0.dp,
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth()
-                                .clickable { onToggle(rule, !rule.enabled) }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(checked = rule.enabled, onCheckedChange = { onToggle(rule, it) })
-                            Column(modifier = Modifier.padding(start = 8.dp).weight(1f)) {
-                                Text(rule.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    text = if (rule.enabled) stringResource(R.string.json_parser_rule_enabled) else stringResource(R.string.json_parser_rule_disabled),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (rule.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                )
-                                Text(
-                                    text = rule.sourceKind.name,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable

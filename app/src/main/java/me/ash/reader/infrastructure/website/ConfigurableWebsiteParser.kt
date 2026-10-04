@@ -7,6 +7,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import me.ash.reader.domain.model.article.Article
+import me.ash.reader.domain.model.article.ArticleCleanupMetadata
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.ui.ext.spacerDollar
 import org.jsoup.nodes.Document
@@ -52,8 +53,9 @@ class ConfigurableWebsiteParser(
             .also { require(it.isNotEmpty()) { "规则 ${rule.name} 未解析出有效文章" } }
     }
 
+    /** 保留原 URL 范围和收藏保护，历史记录仅使用清理元数据。 */
     override fun findObsoleteArticleIds(
-        existingArticles: List<Article>,
+        existingArticles: List<ArticleCleanupMetadata>,
         fetchedArticles: List<Article>,
     ): List<String> {
         if (rule.cleanupMode != WebsiteCleanupMode.URL_ID_RANGE) return emptyList()

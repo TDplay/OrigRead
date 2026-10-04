@@ -22,12 +22,16 @@ class JsonRuleRepository @Inject constructor(
         encodeDefaults = true
     }
 
-    /** 旧订阅只允许唯一的精确 endpoint 匹配，不以域名第一条规则猜测来源身份。 */
+    /** 旧订阅按真实请求语义匹配：内嵌规则请求原页面，API 才解析 endpoint。 */
     fun findRuleForEndpoint(endpointUrl: String): JsonRule? {
-        val matches = findRules(endpointUrl).filter { resolveEndpoint(endpointUrl, it.endpoint) == endpointUrl }
+        val matches = findRulesForEndpoint(endpointUrl)
         require(matches.size <= 1) { "JSON 来源匹配多条规则，请重新探测并选择：$endpointUrl" }
         return matches.singleOrNull()
     }
+
+    /** 旧数据恢复先按请求目标筛选，再由抓取入口用真实响应消除规则歧义。 */
+    fun findRulesForEndpoint(endpointUrl: String): List<JsonRule> =
+        findRules(endpointUrl).filter { requestEndpoint(endpointUrl, it) == endpointUrl }
 
     /** 在来源入库前持久化成功规则，文件写入失败必须阻止订阅被报告成功。 */
     @Synchronized
@@ -35,6 +39,7 @@ class JsonRuleRepository @Inject constructor(
         require(feedId.isNotBlank()) { "JSON 来源 ID 不能为空" }
         validateRule(result.rule)
         val bundle = loadBundle()
+        require(!result.importedRule || bundle.rules.any { it == result.rule }) { "探测后 JSON 规则已改变，请重新探测" }
         val binding = JsonSourceBinding(
             sourcePageUrl, result.endpointUrl, result.rule,
             importedRule = result.importedRule,
@@ -53,9 +58,7 @@ class JsonRuleRepository @Inject constructor(
                 ?: error("JSON 来源规则已删除：${binding.rule.name}")
         } else binding.rule
         require(rule.enabled) { "JSON 来源规则已停用：${rule.name}" }
-        val resolvedEndpoint = if (rule.sourceKind == JsonSourceKind.API) {
-            resolveEndpoint(binding.sourcePageUrl, rule.endpoint)
-        } else binding.sourcePageUrl
+        val resolvedEndpoint = requestEndpoint(binding.sourcePageUrl, rule)
         require(rule.sourceKind == binding.rule.sourceKind && resolvedEndpoint == endpointUrl) {
             "JSON 规则的请求方式或地址已改变，请重新探测来源：${rule.name}"
         }
@@ -64,6 +67,26 @@ class JsonRuleRepository @Inject constructor(
 
     fun resolveEndpoint(inputUrl: String, endpoint: String): String =
         URI(inputUrl).resolve(endpoint).toString()
+
+    /** 探测、旧来源恢复和绑定校验共用请求地址计算，内嵌 JSON 的占位 endpoint 不参与解析。 */
+    fun requestEndpoint(inputUrl: String, rule: JsonRule): String =
+        rule.requestEndpoint(inputUrl, ::resolveEndpoint)
+
+    /** 原地修复优先使用原始页面；无旧绑定的来源使用当前保存地址。 */
+    fun subscriptionPageUrl(feedId: String, savedUrl: String): String =
+        loadBundle().subscriptions[feedId]?.sourcePageUrl ?: savedUrl
+
+    /** 原地修复只保存和恢复目标来源的绑定，不回滚其他来源的规则修改。 */
+    fun subscriptionBinding(feedId: String): JsonSourceBinding? = loadBundle().subscriptions[feedId]
+
+    /** 数据库地址写入失败时恢复原绑定，保留其他账户和来源的最新配置。 */
+    @Synchronized
+    fun restoreSubscriptionBinding(feedId: String, binding: JsonSourceBinding?) {
+        val bundle = loadBundle()
+        val subscriptions = if (binding == null) bundle.subscriptions - feedId
+            else bundle.subscriptions + (feedId to binding)
+        writeBundle(bundle.copy(subscriptions = subscriptions))
+    }
 
     private val ruleFile
         get() = context.filesDir.resolve("json-source-rules.json")

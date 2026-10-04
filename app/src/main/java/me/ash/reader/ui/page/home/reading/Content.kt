@@ -432,6 +432,7 @@ private fun FullContentFailure(
 }
 
 private fun FullContentFailureReason.messageResource(): Int = when (this) {
+    FullContentFailureReason.ARTICLE_UNAVAILABLE -> R.string.reader_article_unavailable
     FullContentFailureReason.NO_CONTENT -> R.string.full_content_failure_no_content
     FullContentFailureReason.DYNAMIC_CONTENT -> R.string.full_content_failure_dynamic
     FullContentFailureReason.ACCESS_RESTRICTED -> R.string.full_content_failure_access_restricted

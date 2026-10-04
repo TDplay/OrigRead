@@ -6,6 +6,8 @@ import java.net.UnknownHostException
 
 /** 全文抓取失败原因。UI 只展示稳定原因，不直接暴露底层异常文本。 */
 enum class FullContentFailureReason {
+    /** 请求的文章已删除或不再可用，不能打开邻近文章替代。 */
+    ARTICLE_UNAVAILABLE,
     NO_CONTENT,
     DYNAMIC_CONTENT,
     ACCESS_RESTRICTED,

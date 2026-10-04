@@ -1343,4 +1343,10 @@
     <string name="rsshub_unsupported_format_notice">此 RSSHub 返回了暂不支持的格式（如 JSON）。请使用 RSS 或 Atom 输出，例如将 format 改为 rss。</string>
     <string name="rsshub_auth_instance_notice">此 RSSHub 路由包含访问密钥或访问码。请填写所属实例的完整 HTTP/HTTPS 地址，避免将凭证发送给其他实例。</string>
     <string name="rsshub_bound_instance_disabled_notice">此带凭证订阅所属的 RSSHub 实例已被禁用或删除。请启用原实例后再进行自动恢复。</string>
+    <string name="reader_article_unavailable">这篇文章已不存在或不再可用。</string>
+    <string name="json_repair_description">重新探测此来源，选择成功规则后确认替换。已有文章、已读状态和收藏都会保留。</string>
+    <string name="json_repair_page_url">来源页面地址</string>
+    <string name="json_repair_probe">重新探测</string>
+    <string name="json_repair_confirm">确认替换规则</string>
+    <string name="json_repair_no_candidates">未找到可用的 JSON 规则，请检查页面地址和已启用规则。</string>
 </resources>

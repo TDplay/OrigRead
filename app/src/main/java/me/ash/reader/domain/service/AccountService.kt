@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
+import java.util.Date
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -195,6 +196,10 @@ constructor(
     }
 
     suspend fun update(account: Account) = accountDao.update(account)
+
+    /** 同步完成使用列更新，不把抓取开始时的账户配置整行写回。 */
+    suspend fun updateSyncTime(accountId: Int, updatedAt: Date) =
+        accountDao.updateSyncTime(accountId, updatedAt)
 
     /** 删除目标账户并切换到剩余账户；最后账户或不存在的目标返回 false，不能作为删除成功。 */
     suspend fun delete(accountId: Int): Boolean {

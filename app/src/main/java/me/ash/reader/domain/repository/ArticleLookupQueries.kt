@@ -4,6 +4,7 @@ import androidx.room.Query
 import androidx.room.RewriteQueriesToDropUnusedColumns
 import androidx.room.Transaction
 import me.ash.reader.domain.model.article.Article
+import me.ash.reader.domain.model.article.ArticleCleanupMetadata
 import me.ash.reader.domain.model.article.ArticleFilterMetadata
 import me.ash.reader.domain.model.article.ArticleWithFeed
 import me.ash.reader.domain.model.feed.Feed
@@ -42,6 +43,10 @@ interface ArticleLookupQueries {
         """
     )
     suspend fun queryAllByFeedId(accountId: Int, feedId: String): List<Article>
+
+    /** URL 范围清理使用最小投影，避免把全来源历史正文读入内存。 */
+    @Query("SELECT id, link, isStarred FROM article WHERE accountId = :accountId AND feedId = :feedId")
+    suspend fun queryCleanupMetadataByFeedId(accountId: Int, feedId: String): List<ArticleCleanupMetadata>
 
     @RewriteQueriesToDropUnusedColumns
     @Query(

@@ -15,6 +15,7 @@ import me.ash.reader.infrastructure.rss.RssHttpCacheDao
 import me.ash.reader.infrastructure.rsshub.RssHubResolver
 import me.ash.reader.infrastructure.rsshub.RssHubSubscriptionRepository
 import me.ash.reader.infrastructure.website.WebsiteHelper
+import me.ash.reader.infrastructure.website.WebsiteRule
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -36,11 +37,25 @@ class LocalSourceService @Inject constructor(
         val notModified: Boolean = false,
         val failure: Exception? = null,
         val pendingCache: RssHttpCache? = null,
+        /** 本次网站响应选中的范围规则；其他来源与无需清理的网站为 null。 */
+        val websiteCleanupRule: WebsiteRule? = null,
     )
 
     /** JSON 订阅在入库前保留成功解析的规则，避免刷新重新按域名选错规则。 */
     fun bindJsonSubscription(feedId: String, sourcePageUrl: String, result: me.ash.reader.infrastructure.json.JsonSourceProbeResult) =
         jsonSourceHelper.bindSubscription(feedId, sourcePageUrl, result)
+
+    /** 修复只更新经过用户确认的已有 JSON 来源，不经普通重复订阅入口改写绑定。 */
+    suspend fun rebindJsonSubscription(request: me.ash.reader.infrastructure.json.JsonRebindRequest) {
+        val current = requireNotNull(feedDao.queryById(request.feed.id)) { "JSON 来源已不存在" }
+        require(current.accountId == request.feed.accountId && current.sourceType == SourceType.JSON) {
+            "JSON 来源归属或类型已改变"
+        }
+        require(current.url == request.feed.url) { "JSON 来源地址已改变，请重新打开来源设置" }
+        jsonSourceHelper.replaceSubscription(request) {
+            check(feedDao.updateSourceUrl(current.id, request.probe.endpointUrl) == 1) { "JSON 来源已不存在" }
+        }
+    }
 
     /**
      * 按来源类型抓取一次，网络和解析错误由具体来源明确上报。
@@ -48,14 +63,14 @@ class LocalSourceService @Inject constructor(
     suspend fun fetch(feed: Feed, preDate: Date = Date()): FeedWithArticle =
         when (feed.sourceType) {
             SourceType.RSS -> fetchRss(feed, preDate)
-            SourceType.WEBSITE -> fetchWebsiteWithRssRecovery(feed, preDate)
+            SourceType.WEBSITE -> fetchWebsiteWithRssRecovery(feed, preDate).feedWithArticle
             SourceType.JSON -> jsonSourceHelper.fetch(feed, preDate)
         }
 
     suspend fun fetchForSync(feed: Feed, preDate: Date = Date()): SyncFetchResult =
         when (feed.sourceType) {
             SourceType.RSS -> fetchRssForSync(feed, preDate)
-            SourceType.WEBSITE -> SyncFetchResult(fetchWebsiteWithRssRecovery(feed, preDate))
+            SourceType.WEBSITE -> fetchWebsiteWithRssRecovery(feed, preDate)
             SourceType.JSON -> SyncFetchResult(jsonSourceHelper.fetch(feed, preDate))
         }
 
@@ -166,11 +181,14 @@ class LocalSourceService @Inject constructor(
     }
 
     /** 抓取普通网站文章列表，并复用原有通知与入库链路。 */
-    private suspend fun fetchWebsite(feed: Feed, preDate: Date): FeedWithArticle {
+    private suspend fun fetchWebsite(feed: Feed, preDate: Date): SyncFetchResult {
         val articles = websiteHelper.fetchArticles(feed, preDate)
-        return FeedWithArticle(
-            feed = feed.copy(isNotification = feed.isNotification && articles.isNotEmpty()),
-            articles = articles,
+        return SyncFetchResult(
+            feedWithArticle = FeedWithArticle(
+                feed = feed.copy(isNotification = feed.isNotification && articles.isNotEmpty()),
+                articles = articles,
+            ),
+            websiteCleanupRule = articles.cleanupRule,
         )
     }
 
@@ -180,13 +198,14 @@ class LocalSourceService @Inject constructor(
      * 正常 Website 先按原逻辑刷新；只有刷新失败且该来源当前 0 篇文章时，才对同一 URL
      * 做一次 direct RSS 解析。解析出非空结构化 Feed 后原地改为 RSS，已有文章的网站绝不改类型。
      */
-    private suspend fun fetchWebsiteWithRssRecovery(feed: Feed, preDate: Date): FeedWithArticle =
+    private suspend fun fetchWebsiteWithRssRecovery(feed: Feed, preDate: Date): SyncFetchResult =
         try {
             fetchWebsite(feed, preDate)
         } catch (error: CancellationException) {
             throw error
         } catch (websiteError: Exception) {
-            recoverMisclassifiedWebsiteRss(feed, preDate) ?: throw websiteError
+            val recovered = recoverMisclassifiedWebsiteRss(feed, preDate) ?: throw websiteError
+            SyncFetchResult(recovered)
         }
 
     private suspend fun recoverMisclassifiedWebsiteRss(feed: Feed, preDate: Date): FeedWithArticle? {

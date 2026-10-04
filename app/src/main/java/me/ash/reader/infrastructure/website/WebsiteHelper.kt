@@ -2,11 +2,9 @@ package me.ash.reader.infrastructure.website
 
 import com.rometools.rome.feed.synd.SyndFeed
 import java.util.Date
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
-import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.feed.SourceType
 import me.ash.reader.infrastructure.content.ArticleWebSessionManager
@@ -34,9 +32,6 @@ class WebsiteHelper @Inject constructor(
     private val articleWebSessionManager: ArticleWebSessionManager,
     @IODispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
-    /** 来源清理必须使用本次抓取实际选中的规则。 */
-    internal val selectedRuleIds = ConcurrentHashMap<String, String>()
-
     /** 静态请求的取消同时覆盖响应头和响应体，成功后再参与来源候选竞争。 */
     suspend fun inspect(url: String, fetchedAt: Date = Date()): SyndFeed = withContext(ioDispatcher) {
         requestHtml(url) { html, finalUrl ->
@@ -102,7 +97,7 @@ class WebsiteHelper @Inject constructor(
     fun hasRule(url: String): Boolean = ruleRepository.findRules(url).isNotEmpty()
 
     /** 刷新沿用来源的动态偏好，固定规则失效必须通过正常错误出口暴露。 */
-    suspend fun fetchArticles(feed: Feed, fetchedAt: Date = Date()): List<Article> {
+    suspend fun fetchArticles(feed: Feed, fetchedAt: Date = Date()): WebsiteArticleBatch {
         if (preferenceRepository.get(feed.id)?.dynamicRenderingEnabled == true) {
             val rendered = dynamicHtmlRenderer.render(feed.url, articleWebSessionManager.desktopHttpUserAgent)
             return withContext(ioDispatcher) {
@@ -120,17 +115,6 @@ class WebsiteHelper @Inject constructor(
                 parseAndRecordSelection(WebsiteCandidateContext(feed, Jsoup.parse(html, finalUrl), fetchedAt))
             }
         }
-    }
-
-    /** 按本次选择的规则清理误收文章，自动候选不进行范围删除。 */
-    fun findObsoleteArticleIds(
-        feed: Feed, existingArticles: List<Article>, fetchedArticles: List<Article>,
-    ): List<String> {
-        val selectedRuleId = selectedRuleIds.remove(feed.id)
-        if (selectedRuleId?.startsWith(AutomaticWebsiteListDetector.RULE_ID_PREFIX) == true) return emptyList()
-        val rule = selectedRuleId?.let(ruleRepository::findRuleById) ?: ruleRepository.findRule(feed.url)
-        return rule?.let { ConfigurableWebsiteParser(it).findObsoleteArticleIds(existingArticles, fetchedArticles) }
-            ?: emptyList()
     }
 
     /** 规则管理页验证使用同一候选选择链路与最终跳转地址。 */

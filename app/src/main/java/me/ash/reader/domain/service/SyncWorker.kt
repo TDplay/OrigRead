@@ -32,7 +32,7 @@ constructor(
         val result = service.sync(accountId = accountId, feedId = feedId, groupId = groupId)
         if (result !is Result.Success) return result
         service.clearKeepArchivedArticles(accountId).forEach {
-            readerCacheHelper.deleteCacheFor(articleId = it.id)
+            readerCacheHelper.deleteCacheFor(articleId = it.id, accountId = it.accountId)
         }
         enqueuePostSync(accountId)
         return result

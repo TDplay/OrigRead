@@ -1,11 +1,15 @@
 package me.ash.reader.ui.page.settings.backup
 
 import android.content.Intent
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +22,10 @@ import me.ash.reader.infrastructure.backup.ConfigurationRestoreResult
 import me.ash.reader.infrastructure.di.IODispatcher
 import me.ash.reader.infrastructure.di.MainDispatcher
 import me.ash.reader.infrastructure.editionsync.EditionSyncTransferManager
+import me.ash.reader.R
+
+/** 一次导出的目标与加密选择快照；密码只在调用期间使用。 */
+data class BackupExportRequest(val uri: Uri, val includeSecrets: Boolean, val password: String)
 
 data class ConfigurationBackupUiState(
     val isWorking: Boolean = false,
@@ -28,6 +36,7 @@ data class ConfigurationBackupUiState(
 
 @HiltViewModel
 class ConfigurationBackupViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val backupService: ConfigurationBackupService,
     private val editionSyncTransferManager: EditionSyncTransferManager,
     @IODispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -67,46 +76,50 @@ class ConfigurationBackupViewModel @Inject constructor(
         }
     }
 
-    /** 生成备份内容。密码只作为本次调用参数使用，不进入 ViewModel 状态。 */
-    fun exportBackup(
-        includeSecrets: Boolean,
-        password: String,
-        callback: (Result<ByteArray>) -> Unit,
-    ) {
-        if (_uiState.value.isWorking) return
-        _uiState.update { it.copy(isWorking = true) }
-        viewModelScope.launch(ioDispatcher) {
-            val result =
-                runCatching {
-                    backupService.exportBackup(includeSecrets, password).toByteArray(Charsets.UTF_8)
-                }
-            withContext(mainDispatcher) {
-                _uiState.update { it.copy(isWorking = false) }
-                callback(result)
-            }
-        }
-    }
+    /** 生成、开流、写入和关闭全部在 IO 执行；成功回调代表文件已经写完。 */
+    fun exportBackup(request: BackupExportRequest, callback: (Result<Unit>) -> Unit) =
+        executeDocumentOperation(operation = {
+            val bytes = backupService.exportBackup(request.includeSecrets, request.password).toByteArray(Charsets.UTF_8)
+            val stream = context.contentResolver.openOutputStream(request.uri, "wt")
+                ?: error(context.getString(R.string.configuration_backup_write_failed))
+            stream.use { it.write(bytes) }
+        }, complete = callback)
 
     /** 读取并校验文件头，成功后显示恢复确认信息。 */
-    fun inspectBackup(content: ByteArray, callback: (Result<ConfigurationBackupSummary>) -> Unit) {
+    fun inspectBackup(uri: Uri, callback: (Result<ConfigurationBackupSummary>) -> Unit) =
+        executeDocumentOperation(operation = {
+            val stream = context.contentResolver.openInputStream(uri)
+                ?: error(context.getString(R.string.configuration_backup_read_failed))
+            val raw = stream.use { it.readBytes().toString(Charsets.UTF_8) }
+            raw to backupService.inspectBackup(raw)
+        }, complete = { result ->
+            result.onSuccess { (raw, summary) ->
+                _uiState.update { it.copy(pendingBackup = raw, pendingSummary = summary) }
+            }
+            callback(result.map { it.second })
+        })
+
+    /** 文档提供器可能等待云端下载；UI 只管理状态和结果，取消保留协程语义。 */
+    private fun <T> executeDocumentOperation(operation: suspend () -> T, complete: (Result<T>) -> Unit) {
         if (_uiState.value.isWorking) return
         _uiState.update { it.copy(isWorking = true) }
-        viewModelScope.launch(ioDispatcher) {
-            val raw = content.toString(Charsets.UTF_8)
-            val result = runCatching { backupService.inspectBackup(raw) }
-            withContext(mainDispatcher) {
-                result.onSuccess { summary ->
-                    _uiState.update {
-                        it.copy(
-                            isWorking = false,
-                            pendingBackup = raw,
-                            pendingSummary = summary,
-                        )
+        viewModelScope.launch(mainDispatcher) {
+            try {
+                val result = withContext(ioDispatcher) {
+                    try {
+                        Result.success(operation())
+                    } catch (error: CancellationException) {
+                        // 离开页面或清理 ViewModel 时停止发布结果，不显示成功或用户错误。
+                        throw error
+                    } catch (error: Exception) {
+                        // 开流、读写、关闭或格式校验失败向页面报告具体异常。
+                        Result.failure(error)
                     }
-                }.onFailure {
-                    _uiState.update { it.copy(isWorking = false) }
                 }
-                callback(result)
+                _uiState.update { it.copy(isWorking = false) }
+                complete(result)
+            } finally {
+                _uiState.update { it.copy(isWorking = false) }
             }
         }
     }

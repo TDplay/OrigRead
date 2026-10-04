@@ -1,7 +1,6 @@
 package me.ash.reader.infrastructure.website
 
 import java.util.Date
-import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.feed.Feed
 import org.jsoup.nodes.Document
 import timber.log.Timber
@@ -78,11 +77,10 @@ private fun WebsiteHelper.fixedCandidateBatch(
 }
 
 /** 成功解析后才记录选择与稳定性历史，失败不覆盖原来的来源偏好。 */
-internal fun WebsiteHelper.parseAndRecordSelection(context: WebsiteCandidateContext): List<Article> {
+internal fun WebsiteHelper.parseAndRecordSelection(context: WebsiteCandidateContext): WebsiteArticleBatch {
     val selection = selectBestCandidate(context)
     val candidate = selection.candidate
     val feedId = context.feed.id
-    selectedRuleIds[feedId] = candidate.rule.id
     if (AutomaticWebsiteListDetector.isReusableRule(candidate.rule)) {
         if (preferenceRepository.get(feedId)?.cachedAutomaticRule?.id != candidate.rule.id) {
             preferenceRepository.saveAutomaticRule(feedId, candidate.rule)
@@ -96,5 +94,5 @@ internal fun WebsiteHelper.parseAndRecordSelection(context: WebsiteCandidateCont
         )
     }
     preferenceRepository.saveLastSelection(feedId, candidate)
-    return candidate.articles
+    return WebsiteArticleBatch(candidate.articles, candidate.rule)
 }

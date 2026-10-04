@@ -10,9 +10,9 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.ash.reader.domain.model.account.AccountType
-import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.feed.SourceType
+import me.ash.reader.infrastructure.website.ConfigurableWebsiteParser
 
 /** 沿用既有来源并发数；不扩大动态页面并发，也不新设性能限制。 */
 private const val SOURCE_SYNC_CONCURRENCY = 16
@@ -52,7 +52,7 @@ internal suspend fun LocalRssService.syncLocalSources(
             "failedSources" to failedCount,
         )
         if (failedCount > 0) return@supervisorScope ListenableWorker.Result.failure(resultData)
-        accountService.update(account.copy(updateAt = Date()))
+        accountService.updateSyncTime(accountId, Date())
         ListenableWorker.Result.success(resultData)
     } catch (error: CancellationException) {
         throw error
@@ -70,7 +70,7 @@ private suspend fun LocalRssService.syncLocalSource(feed: Feed, fetchedAt: Date)
         fetched.failure?.let { throw it }
         if (fetched.notModified) return SourceSyncStatus.UNCHANGED
         val effectiveFeed = fetched.feedWithArticle.feed
-        removeObsoleteWebsiteArticles(effectiveFeed, fetched.feedWithArticle.articles)
+        removeObsoleteWebsiteArticles(fetched)
         val archives = feedDao.queryArchivedArticles(effectiveFeed.id)
         val archivedLinks = archives.map { it.link }.filter { it.isNotBlank() }.toSet()
         val archivedIds = archives.mapNotNull { it.articleId }.toSet()
@@ -96,9 +96,12 @@ private suspend fun LocalRssService.syncLocalSource(feed: Feed, fetchedAt: Date)
 }
 
 /** 网站规则原有误收清理保留，RSS 和 JSON 不使用网站清理策略。 */
-private suspend fun LocalRssService.removeObsoleteWebsiteArticles(feed: Feed, articles: List<Article>) {
+private suspend fun LocalRssService.removeObsoleteWebsiteArticles(fetched: LocalSourceService.SyncFetchResult) {
+    val feed = fetched.feedWithArticle.feed
     if (feed.sourceType != SourceType.WEBSITE) return
-    val existing = articleDao.queryAllByFeedId(feed.accountId, feed.id)
-    val obsolete = websiteHelper.findObsoleteArticleIds(feed, existing, articles)
+    val rule = fetched.websiteCleanupRule ?: return
+    val parser = ConfigurableWebsiteParser(rule)
+    val existing = articleDao.queryCleanupMetadataByFeedId(feed.accountId, feed.id)
+    val obsolete = parser.findObsoleteArticleIds(existing, fetched.feedWithArticle.articles)
     if (obsolete.isNotEmpty()) articleDao.deleteByIds(obsolete)
 }

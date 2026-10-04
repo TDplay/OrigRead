@@ -39,7 +39,7 @@ internal suspend fun GoogleReaderRssService.syncGoogleReaderAccount(accountId: I
             feedDao.insertOrUpdate(subscriptions.values.flatten())
             commitGoogleReaderContents(contents, accountId, this)
             removeOrphanedSubscriptions(accountId, subscriptions.keys.toList(), subscriptions.values.flatten())
-            accountService.update(state.account.copy(updateAt = Date()))
+            accountService.updateSyncTime(accountId, Date())
             ListenableWorker.Result.success()
         } catch (cancelled: CancellationException) {
             // 主动取消不得被改写为任务重试。

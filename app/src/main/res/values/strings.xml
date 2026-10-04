@@ -1501,4 +1501,10 @@
     <string name="rsshub_unsupported_format_notice">This RSSHub response uses an unsupported format, such as JSON. Use RSS or Atom output, for example format=rss.</string>
     <string name="rsshub_auth_instance_notice">This RSSHub route contains an access key or code. Enter the full HTTP/HTTPS address of its instance to keep credentials private.</string>
     <string name="rsshub_bound_instance_disabled_notice">The instance for this authenticated RSSHub subscription has been disabled or removed. Enable that instance to resume automatic recovery.</string>
+    <string name="reader_article_unavailable">This article is no longer available.</string>
+    <string name="json_repair_description">Probe this source again, select a working rule, then confirm. Existing articles, read status and favorites are kept.</string>
+    <string name="json_repair_page_url">Source page URL</string>
+    <string name="json_repair_probe">Probe again</string>
+    <string name="json_repair_confirm">Confirm rule replacement</string>
+    <string name="json_repair_no_candidates">No working JSON rule was found. Check the URL and enabled rules.</string>
 </resources>

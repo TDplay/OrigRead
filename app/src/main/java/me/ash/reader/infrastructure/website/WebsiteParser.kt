@@ -2,6 +2,7 @@ package me.ash.reader.infrastructure.website
 
 import java.util.Date
 import me.ash.reader.domain.model.article.Article
+import me.ash.reader.domain.model.article.ArticleCleanupMetadata
 import me.ash.reader.domain.model.feed.Feed
 import org.jsoup.nodes.Document
 
@@ -21,7 +22,7 @@ interface WebsiteParser {
      * 默认不清理，只有能明确判断列表边界的网站解析器才实现。
      */
     fun findObsoleteArticleIds(
-        existingArticles: List<Article>,
+        existingArticles: List<ArticleCleanupMetadata>,
         fetchedArticles: List<Article>,
     ): List<String> = emptyList()
 }

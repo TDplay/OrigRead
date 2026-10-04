@@ -14,14 +14,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.feed.SourceType
-import me.ash.reader.domain.model.group.Group
 import me.ash.reader.domain.repository.ArticleDao
 import me.ash.reader.domain.repository.FeedDao
 import me.ash.reader.domain.service.LocalRssService
 import me.ash.reader.domain.service.RssService
-import me.ash.reader.R
 import me.ash.reader.infrastructure.android.AndroidStringsHelper
 import me.ash.reader.infrastructure.di.ApplicationScope
 import me.ash.reader.infrastructure.di.IODispatcher
@@ -34,8 +31,6 @@ import me.ash.reader.infrastructure.filter.ArticleFilterRuleType
 import me.ash.reader.infrastructure.json.JsonRule
 import me.ash.reader.infrastructure.json.JsonRuleRepository
 import me.ash.reader.infrastructure.website.WebsiteHelper
-import me.ash.reader.infrastructure.website.WebsitePageTooComplexException
-import me.ash.reader.infrastructure.website.WebsiteParseCandidate
 import me.ash.reader.infrastructure.website.WebsiteRule
 
 @OptIn(ExperimentalMaterialApi::class)
@@ -44,22 +39,26 @@ class FeedOptionViewModel
 @Inject
 constructor(
     val rssService: RssService,
-    private val localRssService: LocalRssService,
-    @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
-    @IODispatcher private val ioDispatcher: CoroutineDispatcher,
-    @ApplicationScope private val applicationScope: CoroutineScope,
-    private val rssHelper: RssHelper,
-    private val articleDao: ArticleDao,
-    private val readerCacheHelper: ReaderCacheHelper,
-    private val feedDao: FeedDao,
-    private val websiteHelper: WebsiteHelper,
-    private val articleFilterRepository: ArticleFilterRepository,
-    private val jsonRuleRepository: JsonRuleRepository,
-    private val androidStringsHelper: AndroidStringsHelper,
+    internal val localRssService: LocalRssService,
+    @MainDispatcher internal val mainDispatcher: CoroutineDispatcher,
+    @IODispatcher internal val ioDispatcher: CoroutineDispatcher,
+    @ApplicationScope internal val applicationScope: CoroutineScope,
+    internal val rssHelper: RssHelper,
+    internal val articleDao: ArticleDao,
+    internal val readerCacheHelper: ReaderCacheHelper,
+    internal val feedDao: FeedDao,
+    internal val websiteHelper: WebsiteHelper,
+    internal val articleFilterRepository: ArticleFilterRepository,
+    internal val jsonRuleRepository: JsonRuleRepository,
+    internal val jsonSourceHelper: me.ash.reader.infrastructure.json.JsonSourceHelper,
+    internal val androidStringsHelper: AndroidStringsHelper,
 ) : ViewModel() {
 
-    private val _feedOptionUiState = MutableStateFlow(FeedOptionUiState())
+    internal val _feedOptionUiState = MutableStateFlow(FeedOptionUiState())
     val feedOptionUiState: StateFlow<FeedOptionUiState> = _feedOptionUiState.asStateFlow()
+
+    internal var jsonRepairJob: kotlinx.coroutines.Job? = null
+    internal var jsonRepairSerial = 0L
 
     init {
         viewModelScope.launch(ioDispatcher) {
@@ -71,194 +70,39 @@ constructor(
         }
     }
 
-    fun showSourceFilterDialog() {
-        val feed = _feedOptionUiState.value.feed ?: return
-        _feedOptionUiState.update {
-            it.copy(
-                sourceFilterDialogVisible = true,
-                sourceFilterRules = articleFilterRepository.getByFeed(feed.id),
-                sourceFilterError = null,
-            )
-        }
-    }
+    fun showSourceFilterDialog() = performShowSourceFilterDialog()
 
-    fun hideSourceFilterDialog() {
-        _feedOptionUiState.update { it.copy(sourceFilterDialogVisible = false, sourceFilterError = null) }
-    }
+    fun hideSourceFilterDialog() = performHideSourceFilterDialog()
 
-    fun addSourceFilter(pattern: String, type: ArticleFilterRuleType): Boolean {
-        val feed = _feedOptionUiState.value.feed ?: return false
-        return runCatching {
-            articleFilterRepository.add(pattern, feed.id, feed.name, type)
-            _feedOptionUiState.update {
-                it.copy(
-                    sourceFilterRules = articleFilterRepository.getByFeed(feed.id),
-                    sourceFilterError = null,
-                )
-            }
-        }.onFailure { error ->
-            _feedOptionUiState.update { it.copy(sourceFilterError = error.message) }
-        }.isSuccess
-    }
+    fun addSourceFilter(pattern: String, type: ArticleFilterRuleType): Boolean = performAddSourceFilter(pattern, type)
 
-    fun setSourceFilterEnabled(rule: ArticleFilterRule, enabled: Boolean) {
-        articleFilterRepository.setEnabled(rule, enabled)
-        showSourceFilterDialog()
-    }
+    fun setSourceFilterEnabled(rule: ArticleFilterRule, enabled: Boolean) = performSetSourceFilterEnabled(rule, enabled)
 
-    fun deleteSourceFilter(rule: ArticleFilterRule) {
-        articleFilterRepository.delete(rule)
-        showSourceFilterDialog()
-    }
+    fun deleteSourceFilter(rule: ArticleFilterRule) = performDeleteSourceFilter(rule)
 
-    fun hideWebsiteParserDialog() {
-        _feedOptionUiState.update { it.copy(websiteParserDialogVisible = false) }
-    }
+    fun hideWebsiteParserDialog() = performHideWebsiteParserDialog()
 
-    fun hideJsonParserDialog() {
-        _feedOptionUiState.update { it.copy(jsonParserDialogVisible = false) }
-    }
+    fun hideJsonParserDialog() = performHideJsonParserDialog()
 
-    suspend fun fetchFeed(feedId: String) {
-        val feed = rssService.get().findFeedById(feedId)
-        val preference = feed?.takeIf { it.sourceType == SourceType.WEBSITE }
-            ?.let { websiteHelper.getParsePreference(it.id) }
-        val configuredWebsiteRules = feed
-            ?.takeIf { it.sourceType == SourceType.WEBSITE }
-            ?.let { websiteHelper.getConfiguredRules(it.url) }
-            .orEmpty()
-        val configuredJsonRules = feed
-            ?.takeIf { it.sourceType == SourceType.JSON }
-            ?.let { jsonRuleRepository.findConfiguredRules(it.url) }
-            .orEmpty()
-        val enabledRuleIds = configuredWebsiteRules.filter(WebsiteRule::enabled).mapTo(hashSetOf(), WebsiteRule::id)
-        val effectivePreferredRuleId =
-            preference?.preferredRuleId?.takeIf { it in enabledRuleIds }
-                ?: preference?.lastSelectedRuleId?.takeIf { it in enabledRuleIds }
-                ?: configuredWebsiteRules.singleOrNull(WebsiteRule::enabled)?.id
-        val effectivePreferredRuleName = effectivePreferredRuleId?.let { ruleId ->
-            configuredWebsiteRules.firstOrNull { it.id == ruleId }?.name
-                ?: websiteHelper.getRuleName(ruleId)
-        }
-        _feedOptionUiState.update {
-            it.copy(
-                feed = feed,
-                selectedGroupId = feed?.groupId ?: "",
-                websiteConfiguredRules = configuredWebsiteRules,
-                jsonConfiguredRules = configuredJsonRules,
-                preferredWebsiteRuleId = effectivePreferredRuleId,
-                preferredWebsiteRuleName =
-                    effectivePreferredRuleName
-                        ?: preference?.preferredRuleName
-                        ?: websiteHelper.getRuleName(effectivePreferredRuleId),
-                lastSelectedWebsiteRuleId = preference?.lastSelectedRuleId,
-                sourceFilterRules = feed?.let { articleFilterRepository.getByFeed(it.id) }.orEmpty(),
-            )
-        }
-    }
+    suspend fun fetchFeed(feedId: String) = performFetchFeed(feedId)
 
-    /** 在当前来源设置抽屉内展示加载状态并后台评估候选，避免创建独立 Dialog Window。 */
-    fun showWebsiteParserDialog() {
-        val feed = _feedOptionUiState.value.feed ?: return
-        if (feed.sourceType != SourceType.WEBSITE) return
-        _feedOptionUiState.update {
-            it.copy(
-                websiteParserDialogVisible = true,
-                websiteParserLoading = true,
-                websiteParserError = null,
-                websiteCandidates = emptyList(),
-                websiteConfiguredRules = websiteHelper.getConfiguredRules(feed.url),
-            )
-        }
-        viewModelScope.launch(ioDispatcher) {
-            val result = runCatching { websiteHelper.evaluateCandidates(feed) }
-            withContext(mainDispatcher) {
-                val error = result.exceptionOrNull()
-                _feedOptionUiState.update {
-                    it.copy(
-                        websiteParserLoading = false,
-                        websiteCandidates = result.getOrDefault(emptyList()),
-                        websiteParserError =
-                            if (error is WebsitePageTooComplexException) {
-                                androidStringsHelper.getString(R.string.website_parser_page_too_complex)
-                            } else {
-                                error?.message
-                            },
-                    )
-                }
-            }
-        }
-    }
+    fun showWebsiteParserDialog() = performShowWebsiteParserDialog()
 
-    /** 保存来源级规则偏好并触发同步；null 表示恢复自动选择。 */
-    fun selectWebsiteRule(ruleId: String?) {
-        val feed = _feedOptionUiState.value.feed ?: return
-        val selectedRuleName =
-            ruleId?.let { selectedId ->
-                _feedOptionUiState.value.websiteCandidates
-                    .firstOrNull { it.rule.id == selectedId }
-                    ?.rule
-                    ?.name
-                    ?: _feedOptionUiState.value.websiteConfiguredRules
-                        .firstOrNull { it.id == selectedId }
-                        ?.name
-                    ?: websiteHelper.getRuleName(selectedId)
-            }
-        websiteHelper.setPreferredRule(feed.id, ruleId, selectedRuleName)
-        _feedOptionUiState.update {
-            it.copy(
-                preferredWebsiteRuleId = ruleId,
-                preferredWebsiteRuleName = selectedRuleName,
-                websiteConfiguredRules = websiteHelper.getConfiguredRules(feed.url),
-                websiteParserDialogVisible = false,
-            )
-        }
-        applicationScope.launch(ioDispatcher) {
-            rssService.get().doSyncOneTime()
-        }
-    }
+    fun selectWebsiteRule(ruleId: String?) = performSelectWebsiteRule(ruleId)
 
-    fun showJsonParserDialog() {
-        val feed = _feedOptionUiState.value.feed ?: return
-        if (feed.sourceType != SourceType.JSON) return
-        _feedOptionUiState.update {
-            it.copy(
-                jsonParserDialogVisible = true,
-                jsonConfiguredRules = jsonRuleRepository.findConfiguredRules(feed.url),
-            )
-        }
-    }
+    fun showJsonParserDialog() = performShowJsonParserDialog()
 
-    /** JSON 来源允许多条规则同时存在；勾选状态直接对应规则 enabled 字段。 */
-    fun setJsonRuleEnabled(rule: JsonRule, enabled: Boolean) {
-        jsonRuleRepository.setEnabled(rule.id, enabled)
-        val feed = _feedOptionUiState.value.feed ?: return
-        _feedOptionUiState.update {
-            it.copy(jsonConfiguredRules = jsonRuleRepository.findConfiguredRules(feed.url))
-        }
-        applicationScope.launch(ioDispatcher) { rssService.get().doSyncOneTime() }
-    }
+    fun setJsonRuleEnabled(rule: JsonRule, enabled: Boolean) = performSetJsonRuleEnabled(rule, enabled)
 
-    /** 更新已有网站文章的列表元数据，并清除正文缓存，让下次打开文章重新抓取。 */
     fun reparseWebsiteArticles(
         callback: (Result<me.ash.reader.domain.service.WebsiteReparseResult>) -> Unit = {},
-    ) {
-        val feed = _feedOptionUiState.value.feed?.takeIf { it.sourceType == SourceType.WEBSITE } ?: return
-        if (_feedOptionUiState.value.websiteReparseLoading) return
-        _feedOptionUiState.update { it.copy(websiteReparseLoading = true) }
-        viewModelScope.launch(ioDispatcher) {
-            val result = runCatching {
-                val existingArticles = articleDao.queryAllByFeedId(feed.accountId, feed.id)
-                val reparseResult = localRssService.reparseWebsiteArticles(feed.id)
-                existingArticles.forEach { article -> readerCacheHelper.deleteCacheFor(article.id) }
-                reparseResult
-            }
-            withContext(mainDispatcher) {
-                _feedOptionUiState.update { it.copy(websiteReparseLoading = false) }
-                callback(result)
-            }
-        }
-    }
+    ) = performReparseWebsiteArticles(callback)
+
+    /** 显式探测和确认已有 JSON 来源，普通重复订阅不触发绑定替换。 */
+    fun probeJsonSource() = performProbeJsonSource()
+    fun inputJsonSourceUrl(url: String) = performInputJsonSourceUrl(url)
+    fun selectJsonProbe(ruleId: String) = performSelectJsonProbe(ruleId)
+    fun confirmJsonRepair() = performConfirmJsonRepair()
 
     fun showNewGroupDialog() {
         _feedOptionUiState.update { it.copy(newGroupDialogVisible = true, newGroupContent = "") }
@@ -428,31 +272,3 @@ constructor(
         }
     }
 }
-
-data class FeedOptionUiState(
-    val feed: Feed? = null,
-    val selectedGroupId: String = "",
-    val newGroupContent: String = "",
-    val newGroupDialogVisible: Boolean = false,
-    val groups: List<Group> = emptyList(),
-    val deleteDialogVisible: Boolean = false,
-    val clearDialogVisible: Boolean = false,
-    val newName: String = "",
-    val renameDialogVisible: Boolean = false,
-    val newUrl: String = "",
-    val changeUrlDialogVisible: Boolean = false,
-    val websiteParserDialogVisible: Boolean = false,
-    val jsonParserDialogVisible: Boolean = false,
-    val websiteParserLoading: Boolean = false,
-    val websiteParserError: String? = null,
-    val websiteCandidates: List<WebsiteParseCandidate> = emptyList(),
-    val websiteConfiguredRules: List<WebsiteRule> = emptyList(),
-    val preferredWebsiteRuleId: String? = null,
-    val preferredWebsiteRuleName: String? = null,
-    val lastSelectedWebsiteRuleId: String? = null,
-    val websiteReparseLoading: Boolean = false,
-    val jsonConfiguredRules: List<JsonRule> = emptyList(),
-    val sourceFilterDialogVisible: Boolean = false,
-    val sourceFilterRules: List<ArticleFilterRule> = emptyList(),
-    val sourceFilterError: String? = null,
-)

@@ -81,21 +81,14 @@ fun ConfigurationBackupPage(
     val exportLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(MimeType.JSON)) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
-            viewModel.exportBackup(includeSecrets, exportPassword) { result ->
+            viewModel.exportBackup(BackupExportRequest(uri, includeSecrets, exportPassword)) { result ->
                 result.fold(
-                    onSuccess = { bytes ->
-                        runCatching {
-                            context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                                ?: error(context.getString(R.string.configuration_backup_write_failed))
-                        }.onSuccess {
+                    onSuccess = {
                             Toast.makeText(
                                 context,
                                 context.getString(R.string.configuration_backup_export_success),
                                 Toast.LENGTH_LONG,
                             ).show()
-                        }.onFailure { error ->
-                            Toast.makeText(context, error.message.orEmpty(), Toast.LENGTH_LONG).show()
-                        }
                     },
                     onFailure = { error ->
                         Toast.makeText(context, error.message.orEmpty(), Toast.LENGTH_LONG).show()
@@ -107,16 +100,8 @@ fun ConfigurationBackupPage(
     val importLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
-            val bytes =
-                runCatching {
-                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: error(context.getString(R.string.configuration_backup_read_failed))
-                }.getOrElse { error ->
-                    Toast.makeText(context, error.message.orEmpty(), Toast.LENGTH_LONG).show()
-                    return@rememberLauncherForActivityResult
-                }
             restorePassword = ""
-            viewModel.inspectBackup(bytes) { result ->
+            viewModel.inspectBackup(uri) { result ->
                 result.exceptionOrNull()?.let { error ->
                     Toast.makeText(
                         context,

@@ -1,6 +1,7 @@
 package me.ash.reader.domain.repository
 
 import androidx.room.*
+import java.util.Date
 import kotlinx.coroutines.flow.Flow
 import me.ash.reader.domain.model.account.Account
 
@@ -45,6 +46,10 @@ interface AccountDao {
 
     @Update
     suspend fun update(vararg account: Account)
+
+    /** 刷新成功只推进时间列，避免网络期间的旧账户快照覆盖用户设置。 */
+    @Query("UPDATE account SET updateAt = :updatedAt WHERE id = :accountId")
+    suspend fun updateSyncTime(accountId: Int, updatedAt: Date)
 
     @Delete
     suspend fun delete(vararg account: Account)
