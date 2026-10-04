@@ -241,9 +241,10 @@ constructor(
         return syncedEntries
     }
 
-    override suspend fun markAsStarred(articleId: String, isStarred: Boolean) {
-        super.markAsStarred(articleId, isStarred)
-        getGoogleReaderAPI()
+    /** 本地收藏与远端标签使用同一账户，远端请求不得重新读取当前界面凭据。 */
+    override suspend fun markAsStarred(account: Account, articleId: String, isStarred: Boolean) {
+        super.markAsStarred(account, articleId, isStarred)
+        getGoogleReaderAPI(account)
             .editTag(
                 itemIds = listOf(articleId.dollarLast()),
                 mark = if (isStarred) GoogleReaderAPI.Stream.Starred.tag else null,

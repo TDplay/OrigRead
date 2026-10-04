@@ -144,8 +144,9 @@ abstract class AbstractRssRepository(
         return emptySet()
     }
 
-    open suspend fun markAsStarred(articleId: String, isStarred: Boolean) {
-        val accountId = accountService.getCurrentAccountId()
+    /** 收藏使用入口捕获的目标账户，排队期间切换账户不会改变 DAO 写入范围。 */
+    open suspend fun markAsStarred(account: Account, articleId: String, isStarred: Boolean) {
+        val accountId = requireNotNull(account.id) { "收藏账户缺少持久化 ID" }
         articleDao.markAsStarredByArticleId(accountId, articleId, isStarred)
     }
 

@@ -66,7 +66,11 @@ data class ReaderState(
             }
     }
 
-    data class FullContent(val content: String) : ContentState
+    data class FullContent(
+        val content: String,
+        /** 当前正文可阅读，但本次抓取未能保存供离线使用。 */
+        val cacheWriteFailed: Boolean = false,
+    ) : ContentState
 
     data class Description(val content: String) : ContentState
 

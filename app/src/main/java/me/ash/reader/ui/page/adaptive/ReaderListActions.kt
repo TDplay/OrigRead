@@ -39,11 +39,10 @@ internal fun ArticleListReaderViewModel.performUpdateReadStatus(
 }
 
 /** 收藏状态先捕获目标文章，后台写入使用该文章的账户。 */
-internal fun ArticleListReaderViewModel.performUpdateStarredStatus(articleId: String?, isStarred: Boolean) {
+internal fun ArticleListReaderViewModel.performUpdateStarredStatus(article: Article, isStarred: Boolean) {
+    val targetArticle = article.copy()
     applicationScope.launch(ioDispatcher) {
-        if (articleId != null) {
-            rssService.get().markAsStarred(articleId = articleId, isStarred = isStarred)
-        }
+        rssService.markAsStarred(targetArticle, isStarred)
     }
 }
 
@@ -154,10 +153,10 @@ internal fun ArticleListReaderViewModel.performUpdateReadStatus(isUnread: Boolea
 
 /** 收藏状态先捕获目标文章，后台写入使用该文章的账户。 */
 internal fun ArticleListReaderViewModel.performUpdateStarredStatus(isStarred: Boolean) {
-    val article = currentArticle ?: return
+    val article = currentArticle?.copy() ?: return
     _readingUiState.update { it.copy(isStarred = isStarred) }
     applicationScope.launch(ioDispatcher) {
-        rssService.forAccount(article.accountId).markAsStarred(articleId = article.id, isStarred = isStarred)
+        rssService.markAsStarred(article, isStarred)
     }
 }
 

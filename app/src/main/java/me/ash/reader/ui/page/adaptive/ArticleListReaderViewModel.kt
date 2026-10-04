@@ -107,7 +107,7 @@ constructor(
         isUnread: Boolean,
     ) = performUpdateReadStatus(ReaderReadStatusRequest(groupId, feedId, articleId, conditions, isUnread))
 
-    fun updateStarredStatus(articleId: String?, isStarred: Boolean) = performUpdateStarredStatus(articleId, isStarred)
+    fun updateStarredStatus(article: Article, isStarred: Boolean) = performUpdateStarredStatus(article, isStarred)
 
     fun markAsReadFromListByDate(date: Date, isBefore: Boolean) = performMarkAsReadFromListByDate(date, isBefore)
 

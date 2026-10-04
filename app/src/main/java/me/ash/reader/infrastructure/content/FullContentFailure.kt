@@ -14,6 +14,8 @@ enum class FullContentFailureReason {
     PAGE_UNAVAILABLE,
     INVALID_URL,
     NETWORK,
+    /** 正文缓存读写、空间或权限故障，与网络请求失败分开提示。 */
+    STORAGE,
     UNKNOWN,
 }
 
@@ -23,6 +25,9 @@ class FullContentException(
     message: String,
     cause: Throwable? = null,
 ) : IOException(message, cause)
+
+/** 本地正文缓存失败保留底层异常，用于离线保存提示和后台失败报告。 */
+class FullContentCacheException(message: String, cause: Throwable) : IOException(message, cause)
 
 /** 根据静态 HTML 特征区分动态页面、访问限制和普通正文缺失。 */
 object FullContentFailureClassifier {
@@ -43,6 +48,7 @@ object FullContentFailureClassifier {
 
     fun classifyThrowable(throwable: Throwable): FullContentFailureReason = when (throwable) {
         is FullContentException -> throwable.reason
+        is FullContentCacheException -> FullContentFailureReason.STORAGE
         is SocketTimeoutException, is UnknownHostException, is IOException ->
             FullContentFailureReason.NETWORK
         else -> FullContentFailureReason.UNKNOWN

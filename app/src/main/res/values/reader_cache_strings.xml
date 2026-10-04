@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="full_content_cache_not_saved">The article is ready to read, but could not be saved for offline use.</string>
+    <string name="full_content_failure_storage">The article cache could not be read. Check available storage and try again.</string>
+</resources>

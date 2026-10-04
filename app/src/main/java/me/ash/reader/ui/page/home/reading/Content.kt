@@ -439,5 +439,6 @@ private fun FullContentFailureReason.messageResource(): Int = when (this) {
     FullContentFailureReason.PAGE_UNAVAILABLE -> R.string.full_content_failure_page_unavailable
     FullContentFailureReason.INVALID_URL -> R.string.full_content_failure_invalid_url
     FullContentFailureReason.NETWORK -> R.string.full_content_failure_network
+    FullContentFailureReason.STORAGE -> R.string.full_content_failure_storage
     FullContentFailureReason.UNKNOWN -> R.string.full_content_failure_unknown
 }

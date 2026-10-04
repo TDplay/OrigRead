@@ -202,9 +202,10 @@ constructor(
         return syncedEntries
     }
 
-    override suspend fun markAsStarred(articleId: String, isStarred: Boolean) {
-        super.markAsStarred(articleId, isStarred)
-        val feverAPI = getFeverAPI()
+    /** Fever 收藏同样固定文章账户，使本地状态与远端凭据保持一致。 */
+    override suspend fun markAsStarred(account: Account, articleId: String, isStarred: Boolean) {
+        super.markAsStarred(account, articleId, isStarred)
+        val feverAPI = getFeverAPI(account)
         feverAPI.markItem(
             status = if (isStarred) FeverDTO.StatusEnum.Saved else FeverDTO.StatusEnum.Unsaved,
             id = articleId.dollarLast(),

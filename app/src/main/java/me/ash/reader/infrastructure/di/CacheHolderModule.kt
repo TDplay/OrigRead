@@ -13,6 +13,7 @@ import me.ash.reader.domain.data.DiffMapHolder
 import me.ash.reader.domain.service.AccountService
 import me.ash.reader.infrastructure.preference.SettingsProvider
 import me.ash.reader.infrastructure.rss.ReaderCacheHelper
+import me.ash.reader.infrastructure.rss.ReaderContentCache
 import me.ash.reader.infrastructure.rss.RssHelper
 import javax.inject.Singleton
 
@@ -35,12 +36,13 @@ object CacheHolderModule {
 
     @Provides
     @Singleton
+    /** 前台和 Worker 使用同一缓存存储组件，文件互斥覆盖全部正文入口。 */
     fun provideCacheHelper(
-        @ApplicationContext context: Context,
+        contentCache: ReaderContentCache,
         @IODispatcher ioDispatcher: CoroutineDispatcher,
         rssHelper: RssHelper,
     ): ReaderCacheHelper = ReaderCacheHelper(
-        context = context, ioDispatcher = ioDispatcher,
+        contentCache = contentCache, ioDispatcher = ioDispatcher,
         rssHelper = rssHelper,
     )
 }

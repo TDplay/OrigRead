@@ -186,7 +186,7 @@ fun FlowPage(
     val onToggleStarred: (ArticleWithFeed) -> Unit = remember {
         { article ->
             viewModel.updateStarredStatus(
-                articleId = article.article.id,
+                article = article.article,
                 isStarred = !article.article.isStarred,
             )
         }

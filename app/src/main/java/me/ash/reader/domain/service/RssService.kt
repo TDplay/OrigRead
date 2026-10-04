@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.stateIn
 import me.ash.reader.domain.model.account.AccountType
+import me.ash.reader.domain.model.article.Article
 import me.ash.reader.infrastructure.di.ApplicationScope
 
 @Singleton
@@ -37,6 +38,14 @@ constructor(
     suspend fun forAccount(accountId: Int): AbstractRssRepository {
         val account = requireNotNull(accountService.getAccountById(accountId)) { "账户不存在：$accountId" }
         return get(account.type.id)
+    }
+
+    /** 收藏只解析一次文章所属账户，再将同一个账户传给协议服务和持久化入口。 */
+    suspend fun markAsStarred(article: Article, isStarred: Boolean) {
+        val account = requireNotNull(accountService.getAccountById(article.accountId)) {
+            "收藏账户不存在：${article.accountId}"
+        }
+        get(account.type.id).markAsStarred(account, article.id, isStarred)
     }
 
     /** 订阅页已经固定目标账户；按它选择服务，实际落库处再校验分组归属。 */

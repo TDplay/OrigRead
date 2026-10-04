@@ -239,6 +239,7 @@ fun ReadingPage(
     val isPullToSwitchArticleEnabled = LocalPullToSwitchArticle.current.value
     val readingUiState = viewModel.readingUiState.collectAsStateValue()
     val readerState = viewModel.readerStateStateFlow.collectAsStateValue()
+    FullContentCacheNotice(readerState.articleId, readerState.content)
     val translationState = viewModel.translationUiState.collectAsStateValue()
     val translationSettings = viewModel.translationSettings.collectAsStateValue()
     val aiSummaryState = viewModel.aiSummaryUiState.collectAsStateValue()

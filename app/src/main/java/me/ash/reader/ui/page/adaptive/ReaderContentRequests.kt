@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.ash.reader.domain.model.article.Article
 import me.ash.reader.infrastructure.rss.ReaderContentPolicy
+import me.ash.reader.infrastructure.rss.ReaderFullContentResult
 import me.ash.reader.infrastructure.content.FullContentFailureClassifier
 
 /** 沿用既有全文 loading 延迟，避免快速缓存命中闪烁。 */
@@ -34,14 +35,14 @@ internal fun ArticleListReaderViewModel.performParseVerifiedPage(html: String, s
                 _readerState.update { it.copy(content = ReaderState.Error(FullContentFailureClassifier.classifyHtml(html))) }
                 return@launch
             }
-            readerCacheHelper.writeContentToCache(extracted.html, article)
+            val cachedContent = readerCacheHelper.cacheFullContent(extracted.html, article)
             articleWebSessionManager.flushCookies()
-            publishFullContentResult(identity, Result.success(extracted.html))
+            publishFullContentResult(identity, Result.success(cachedContent))
         } catch (error: CancellationException) {
             // 验证页面也受正文请求代次管理，取消后不能显示失败或覆盖新文章。
             throw error
         } catch (error: Exception) {
-            // 提取或缓存写入失败保留真实原因，只有当前请求可更新阅读错误。
+            // 提取或验证会话失败仍明确报错；缓存写入失败随有效正文单独发布。
             publishFullContentResult(identity, Result.failure(error))
         }
     }
@@ -90,7 +91,7 @@ internal suspend fun ArticleListReaderViewModel.fetchRequestedContent(identity: 
             if (isCurrentRequest(identity)) setLoading()
         }
         try {
-            val result = readerCacheHelper.readOrFetchFullContent(article)
+            val result = readerCacheHelper.readOrFetchFullContentForReading(article)
             currentCoroutineContext().ensureActive()
             publishFullContentResult(identity, result)
         } finally {
@@ -100,13 +101,19 @@ internal suspend fun ArticleListReaderViewModel.fetchRequestedContent(identity: 
     }
 
 /** 所有状态发布先核对身份，旧结果不能改正文、错误或 AI 展示状态。 */
-private fun ArticleListReaderViewModel.publishFullContentResult(identity: ReaderRequestIdentity, result: Result<String>) {
+private fun ArticleListReaderViewModel.publishFullContentResult(
+    identity: ReaderRequestIdentity,
+    result: Result<ReaderFullContentResult>,
+) {
     result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
     if (!isCurrentRequest(identity)) return
     result.fold(onSuccess = { content ->
         resetTranslation()
         resetAiSummary()
-        _readerState.update { it.copy(content = ReaderState.FullContent(content)) }
+        // 离线写入失败仍展示本次正文，提示状态与正文一起受请求身份校验保护。
+        _readerState.update {
+            it.copy(content = ReaderState.FullContent(content.content, cacheWriteFailed = content.cacheWriteFailure != null))
+        }
     }, onFailure = { error ->
         _readerState.update { it.copy(content = ReaderState.Error(FullContentFailureClassifier.classifyThrowable(error))) }
     })
