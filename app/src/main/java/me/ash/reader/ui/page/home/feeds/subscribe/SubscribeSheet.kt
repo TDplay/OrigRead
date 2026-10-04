@@ -95,7 +95,7 @@ private fun SubscriptionAnimatedActions(state: SubscribeState, loading: Boolean,
     ) { SubscribeSheetActions(it, loading, actions) }
 }
 
-/** 来源名称和原始页面地址仍显示在固定头部。 */
+/** 配置头部显示实际准备保存的来源名称和 Feed 地址。 */
 @Composable
 private fun SubscribeSheetHeader(state: SubscribeState, actions: SubscribeSheetCallbacks) {
     val configure = state as? SubscribeState.Configure
@@ -125,7 +125,7 @@ private fun SubscriptionHeaderText(state: SubscribeState, rename: () -> Unit) {
         is SubscribeState.Idle -> stringResource(R.string.subscribe)
         SubscribeState.Hidden -> ""
     }
-    val url = configure?.sourcePageUrl ?: (state as? SubscribeState.Input)?.linkState?.text?.toString().orEmpty()
+    val url = configure?.feedLink ?: (state as? SubscribeState.Input)?.linkState?.text?.toString().orEmpty()
     Text(
         modifier = if (configure != null) Modifier.roundClick(onClick = rename) else Modifier,
         text = title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,

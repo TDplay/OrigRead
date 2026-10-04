@@ -1096,6 +1096,12 @@
     <string name="source_catalog_matches_desc_truncated">匹配到 %1$d
   个已知来源，显示前 %2$d 个；选择后会重新验证。</string>
     <string name="source_catalog_match_validate">验证</string>
+    <string name="subscription_current_source">当前准备订阅的来源</string>
+    <string name="subscription_native_rss_confirmed">已识别为 RSS/Atom，可确认订阅</string>
+    <string name="subscription_feed_address">实际订阅地址：%1$s</string>
+    <string name="subscription_other_catalog_unverified">其他目录建议，尚未验证</string>
+    <string name="subscription_catalog_expand">展开目录建议</string>
+    <string name="subscription_catalog_collapse">收起目录建议</string>
     <string
     name="translation_endpoint">服务地址</string>
     <string name="translation_region">Azure 区域</string>

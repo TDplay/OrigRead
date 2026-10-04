@@ -1,6 +1,7 @@
 package me.ash.reader.infrastructure.discovery
 
 import java.net.URI
+import java.util.Locale
 import me.ash.reader.infrastructure.source.SourceUrlNormalizer
 
 /**
@@ -45,6 +46,7 @@ class FeedCatalogIndex(
         }
     }
 
+    /** 精确命中保持原语义；GitHub 的同域建议额外限定完整仓库身份。 */
     fun matchUrl(rawUrl: String): FeedCatalogUrlMatch {
         val comparisonKey = catalogComparisonKey(rawUrl)
         val exactFeedMatches = feedUrlIndex[comparisonKey].orEmpty().distinctBy(FeedCatalogEntry::id)
@@ -68,11 +70,23 @@ class FeedCatalogIndex(
         }
 
         val host = normalizedHost(rawUrl) ?: return FeedCatalogUrlMatch()
-        val hostMatches = hostIndex[host].orEmpty().distinctBy(FeedCatalogEntry::id)
+        val hostMatches = relatedHostMatches(host, rawUrl).distinctBy(FeedCatalogEntry::id)
         return FeedCatalogUrlMatch(
             suggestions = hostMatches.take(MAX_URL_SUGGESTIONS),
             totalSuggestions = hostMatches.size,
         )
+    }
+
+    /** GitHub 的共享域名不能代表同一来源，其他网站继续使用已有同域规则。 */
+    private fun relatedHostMatches(host: String, rawUrl: String): List<FeedCatalogEntry> {
+        val matches = hostIndex[host].orEmpty()
+        if (host != GITHUB_HOST) return matches
+        val repository = githubRepository(rawUrl) ?: return emptyList()
+        return matches.filter { feed ->
+            sequenceOf(feed.feedUrl, feed.siteUrl).filterNotNull().any { url ->
+                normalizedHost(url) == GITHUB_HOST && githubRepository(url) == repository
+            }
+        }
     }
 
     private fun buildSearchBlob(feed: FeedCatalogEntry): String =
@@ -96,7 +110,20 @@ class FeedCatalogIndex(
     }
 
     companion object {
+        /** URL 提示延用原有八项展示范围，全目录搜索不受此限制。 */
         const val MAX_URL_SUGGESTIONS = 8
+        /** GitHub 域名由多个独立仓库共享，不能直接用于来源关联。 */
+        private const val GITHUB_HOST = "github.com"
+        /** GitHub 仓库身份由完整 owner 和 repo 两个路径段构成。 */
+        private const val GITHUB_REPOSITORY_SEGMENT_COUNT = 2
+
+        /** 缺少任一仓库标识时不做建议，避免根地址或账号页退化为全站推荐。 */
+        private fun githubRepository(value: String): List<String>? {
+            val path = runCatching { URI(value.trim()).rawPath }.getOrNull() ?: return null
+            val segments = path.trim('/').split('/').take(GITHUB_REPOSITORY_SEGMENT_COUNT)
+            if (segments.size != GITHUB_REPOSITORY_SEGMENT_COUNT || segments.any(String::isBlank)) return null
+            return segments.map { it.lowercase(Locale.ROOT) }
+        }
 
         /**
          * 目录身份匹配比数据库查重略宽松：忽略 http/https、www 和尾斜杠，但继续保留 path/query。

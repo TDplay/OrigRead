@@ -1253,6 +1253,12 @@
   match; showing %2$d. Select one to validate it.</string>
     <string
     name="source_catalog_match_validate">Validate</string>
+    <string name="subscription_current_source">Source ready to subscribe</string>
+    <string name="subscription_native_rss_confirmed">RSS/Atom identified. Ready to subscribe.</string>
+    <string name="subscription_feed_address">Subscription address: %1$s</string>
+    <string name="subscription_other_catalog_unverified">Other catalog suggestions, not yet verified</string>
+    <string name="subscription_catalog_expand">Expand catalog suggestions</string>
+    <string name="subscription_catalog_collapse">Collapse catalog suggestions</string>
     <string name="translation_endpoint">Service address</string>
     <string name="translation_region">Azure region</string>
     <string

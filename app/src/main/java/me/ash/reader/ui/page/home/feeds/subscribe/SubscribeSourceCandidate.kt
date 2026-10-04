@@ -28,6 +28,11 @@ data class SubscribeSourceCandidate(
     val rssHubInstanceBaseUrl: String? = null,
 )
 
+/** 只有真实解析得到的普通 RSS/Atom 才算原生来源；RSSHub 虽使用 RSS 保存类型，也不能混入。 */
+internal val SubscribeSourceCandidate.isConfirmedNativeRss: Boolean
+    get() = sourceType == SourceType.RSS &&
+        (kind == SourceCandidateKind.RSS_DIRECT || kind == SourceCandidateKind.RSS_DISCOVERED)
+
 /** 探测阶段尚未执行统一健康评分的来源结果。 */
 internal data class SubscribeCandidateProbe(
     val feed: SyndFeed,
@@ -52,11 +57,7 @@ internal object SubscribeCandidateSelector {
      * 这里仅识别普通 RSS 发现结果，不把后续 fallback 产生的 RSSHub 候选算进来。
      */
     fun hasConfirmedRss(candidates: List<SubscribeCandidateProbe>): Boolean =
-        rank(candidates).any { candidate ->
-            candidate.sourceType == SourceType.RSS &&
-                (candidate.kind == SourceCandidateKind.RSS_DIRECT ||
-                    candidate.kind == SourceCandidateKind.RSS_DISCOVERED)
-        }
+        rank(candidates).any { it.isConfirmedNativeRss }
 
     fun rank(candidates: List<SubscribeCandidateProbe>): List<SubscribeSourceCandidate> =
         candidates

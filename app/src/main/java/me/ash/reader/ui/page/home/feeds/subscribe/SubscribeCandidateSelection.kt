@@ -55,6 +55,8 @@ internal fun SubscribeViewModel.applyDiscoveryResult(options: SubscribeDiscovery
         )
         return
     }
+    // 原生来源已经真实解析成功，未验证目录建议不再进入订阅配置，RSSHub 路由继续保留。
+    val confirmedNativeRss = selected.isConfirmedNativeRss
     val groups = groupsFlow.value.filter { it.accountId == options.accountId }
     val groupId = groups.firstOrNull { it.id == options.firstGroupId }?.id
         ?: groups.firstOrNull()?.id ?: error("探测账户没有可用分组")
@@ -66,7 +68,8 @@ internal fun SubscribeViewModel.applyDiscoveryResult(options: SubscribeDiscovery
         browser = if (selected.sourceType == SourceType.RSS) false else selected.browser,
         candidates = ranked, selectedCandidateId = selected.id, selectedCandidateIds = setOf(selected.id),
         dynamicRendering = selected.dynamicRendering, rssHubResults = result.rssHubResults,
-        catalogMatches = options.idle.catalogMatches, catalogMatchCount = options.idle.catalogMatchCount,
+        catalogMatches = if (confirmedNativeRss) emptyList() else options.idle.catalogMatches,
+        catalogMatchCount = if (confirmedNativeRss) 0 else options.idle.catalogMatchCount,
     )
 }
 

@@ -87,13 +87,14 @@ private fun SubscriptionIdleSuggestions(state: SubscribeState.Idle?, onCatalog: 
     }
 }
 
-/** 失败消息保留在候选区，部分成功后只选中失败来源供重试。 */
+/** 先明确当前来源，再配置订阅；未验证目录建议收起并放在主要配置之后。 */
 @Composable
 internal fun SubscribeConfigureContent(state: SubscribeState.Configure, actions: SubscribeSheetCallbacks) {
     Column(
         modifier = Modifier.fillMaxWidth().heightIn(max = 570.dp).verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 14.dp),
     ) {
+        SubscriptionCurrentSource(state)
         SubscriptionConfigureCandidates(state, actions)
         SubscriptionSourceNotice(state)
         SubscriptionFailureMessage(state.submissionMessage)
@@ -105,16 +106,13 @@ internal fun SubscribeConfigureContent(state: SubscribeState.Configure, actions:
             onGroupClick = actions.onGroupClick, onAddNewGroup = actions.onAddGroup,
             sourceType = state.sourceType, showUrl = false, showArticleFilter = false, scrollable = false,
         )
+        SubscriptionCatalogSuggestions(state, actions.onSelectCatalog)
     }
 }
 
-/** 来源目录、RSSHub 路由和其它候选继续按原有顺序展示。 */
+/** RSSHub 多路由与实际探测候选仍保留选择入口，不把未验证目录项混入其中。 */
 @Composable
 private fun SubscriptionConfigureCandidates(state: SubscribeState.Configure, actions: SubscribeSheetCallbacks) {
-    if (state.catalogMatches.isNotEmpty()) {
-        CatalogMatchSection(state.catalogMatches, state.catalogMatchCount, actions.onSelectCatalog)
-        Spacer(modifier = Modifier.height(20.dp))
-    }
     if (state.rssHubResults.isNotEmpty()) {
         RssHubRouteSection(
             state.rssHubResults, state.candidates, state.selectedCandidateIds, actions.onToggleRssHub,
