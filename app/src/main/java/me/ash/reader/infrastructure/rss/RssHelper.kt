@@ -54,127 +54,27 @@ import okio.IOException
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 
-val enclosureTagRegex = """<enclosure\b[^>]*>""".toRegex(RegexOption.IGNORE_CASE)
-val enclosureUrlRegex = """\burl\s*=\s*(["'])(.*?)\1""".toRegex(RegexOption.IGNORE_CASE)
-val enclosureTypeRegex = """\btype\s*=\s*(["'])(.*?)\1""".toRegex(RegexOption.IGNORE_CASE)
-val imgRegex = """img.*?src=(["'])((?!data).*?)\1""".toRegex(RegexOption.DOT_MATCHES_ALL)
-
-/** RSS 探测结果，feedUrl 为最终应保存和同步的真实 Feed 地址。 */
-data class DiscoveredFeed(
-    val feedUrl: String,
-    val feed: SyndFeed,
-    val discoveredFromPage: Boolean,
-    val etag: String? = null,
-    val lastModified: String? = null,
-)
-
-private data class ParsedFeedResponse(
-    val feed: SyndFeed,
-    val etag: String?,
-    val lastModified: String?,
-)
-
-/** RSS 刷新结果。304 必须与“成功解析但暂时没有文章”严格区分。 */
-data class RssQueryResult(
-    val articles: List<Article>,
-    val notModified: Boolean = false,
-    val successful: Boolean = true,
-    val etag: String? = null,
-    val lastModified: String? = null,
-    val failure: Exception? = null,
-)
-
-enum class FeedFetchFailureReason {
-    BLOCKED_RESPONSE, HTTP_ERROR, HTML_RESPONSE, INVALID_CONTENT, UNSUPPORTED_FORMAT,
-}
-
-class FeedFetchException(
-    val reason: FeedFetchFailureReason,
-    val statusCode: Int? = null,
-    message: String,
-    cause: Throwable? = null,
-) : IOException(message, cause)
-
 /** Some operations on RSS. */
 class RssHelper
 @Inject
 constructor(
     @ApplicationContext private val context: Context,
-    @IODispatcher private val ioDispatcher: CoroutineDispatcher,
-    private val okHttpClient: OkHttpClient,
-    private val contentExtractionService: ContentExtractionService,
-    private val dynamicArticleContentService: DynamicArticleContentService,
-    private val articleWebSessionManager: ArticleWebSessionManager,
+    @IODispatcher internal val ioDispatcher: CoroutineDispatcher,
+    internal val okHttpClient: OkHttpClient,
+    internal val contentExtractionService: ContentExtractionService,
+    internal val dynamicArticleContentService: DynamicArticleContentService,
+    internal val articleWebSessionManager: ArticleWebSessionManager,
 ) {
-    private val rssHubHttpClients = RssHubHttpClients(okHttpClient)
+    internal val rssHubHttpClients = RssHubHttpClients(okHttpClient)
 
+
+    /** 探测沿用真实 XML 验证与网页 alternate 发现。 */
     @Throws(Exception::class)
-    suspend fun searchFeed(feedLink: String): SyndFeed {
-        return discoverFeed(feedLink).feed
-    }
+    suspend fun searchFeed(feedLink: String): SyndFeed = discoverFeed(feedLink).feed
 
-    /**
-     * 优先将输入地址直接按 Feed 解析；失败后再从普通网页的 alternate 链接发现 RSS/Atom。
-     * 所有候选都会实际请求并解析，避免仅凭 type 或文件后缀误判。
-     */
+    /** Feed 图标不参与订阅发现有效性判断。 */
     @Throws(Exception::class)
-    suspend fun discoverFeed(inputUrl: String): DiscoveredFeed =
-        withContext(ioDispatcher) {
-            runCatching { parseFeedUrlWithValidators(inputUrl, inputUrl) }
-                .map { parsed ->
-                    DiscoveredFeed(
-                        feedUrl = inputUrl,
-                        feed = parsed.feed,
-                        discoveredFromPage = false,
-                        etag = parsed.etag,
-                        lastModified = parsed.lastModified,
-                    )
-                }
-                .getOrElse { directError ->
-                    // 输入普通网页时按浏览器页面请求，避免站点因 OrigRead UA 直接返回 418/403；
-                    // 真正的 RSS/XML 候选仍继续使用普通 Feed 请求身份。
-                    val pageResponse = websitePageResponse(okHttpClient, inputUrl)
-                    val html =
-                        HttpTextDecoder.decode(
-                            bytes = pageResponse.body.bytes(),
-                            contentType = pageResponse.header("Content-Type"),
-                            kind = HttpTextKind.HTML,
-                        )
-                    val document = Jsoup.parse(html, inputUrl)
-                    val candidates =
-                        buildList {
-                            addAll(
-                                document
-                                    .select("link[rel~=alternate][href]")
-                                    .asSequence()
-                                    .filter { element ->
-                                        val type = element.attr("type").lowercase()
-                                        type.contains("rss") ||
-                                            type.contains("atom") ||
-                                            type.contains("rdf") ||
-                                            type.contains("xml")
-                                    }
-                                    .map { it.absUrl("href") }
-                                    .filter { it.isNotBlank() }
-                                    .toList()
-                            )
-                            addAll(buildCommonFeedCandidates(inputUrl))
-                        }.distinct()
-
-                    candidates.firstNotNullOfOrNull { candidateUrl ->
-                        runCatching {
-                            val parsed = parseFeedUrlWithValidators(candidateUrl, inputUrl)
-                            DiscoveredFeed(
-                                feedUrl = candidateUrl,
-                                feed = parsed.feed,
-                                discoveredFromPage = true,
-                                etag = parsed.etag,
-                                lastModified = parsed.lastModified,
-                            )
-                        }.getOrNull()
-                    } ?: throw directError
-                }
-        }
+    suspend fun discoverFeed(inputUrl: String): DiscoveredFeed = discoverSourceFeed(inputUrl)
 
     /** 直接解析指定 Feed，不执行网页发现；可传入自定义图标来源与短超时客户端。 */
     suspend fun parseFeedDirect(
@@ -189,271 +89,25 @@ constructor(
     suspend fun parseFeedDirect(feedUrl: String): SyndFeed =
         parseFeedDirect(feedUrl, feedUrl, okHttpClient)
 
-    /** 请求并解析单个 Feed 地址，站点图标优先按原始网页地址查找。 */
-    private suspend fun parseFeedUrlWithValidators(
-        feedUrl: String,
-        iconSourceUrl: String,
-        client: OkHttpClient = okHttpClient,
-    ): ParsedFeedResponse {
-        return withFeedResponse(client, Request.Builder().url(feedUrl).build()) { response ->
-            val feed =
-                parseFeedResponse(response)
-                    .also {
-                        require(it.title?.isNotBlank() == true || it.entries.isNotEmpty()) {
-                            "Feed 内容为空或格式无效"
-                        }
-                        val iconLink =
-                            try {
-                                queryRssIconLink(iconSourceUrl)
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (_: Exception) {
-                                null
-                            }
-                        if (!iconLink.isNullOrBlank()) {
-                            it.icon = SyndImageImpl().apply {
-                                link = iconLink
-                                url = iconLink
-                            }
-                        }
-                    }
-            ParsedFeedResponse(
-                feed = feed,
-                etag = response.header("ETag")?.trim()?.takeIf { it.isNotEmpty() },
-                lastModified = response.header("Last-Modified")?.trim()?.takeIf { it.isNotEmpty() },
-            )
-        }
-    }
 
-    /** 取消覆盖响应体读取阶段，避免仅取消等待响应头而留下阻塞的网络请求。 */
-    private suspend fun <T> withFeedResponse(
-        client: OkHttpClient,
-        request: Request,
-        block: suspend (Response) -> T,
-    ): T = withContext(ioDispatcher) {
-        coroutineScope {
-            val call = client.newCall(request)
-            val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
-                try { awaitCancellation() } finally { call.cancel() }
-            }
-            try { call.executeAsync().use { block(it) } }
-            catch (error: Exception) {
-                // 关闭阻塞中的 socket 会抛 IOException；取消仍须传播为正常的协程取消。
-                currentCoroutineContext().ensureActive()
-                throw error
-            }
-            finally { cancellationWatcher.cancel() }
-        }
-    }
-
-    private fun parseFeedResponse(response: Response, preserveWireFeed: Boolean = false): SyndFeed {
-        if (response.header("cf-mitigated").equals("challenge", ignoreCase = true)) {
-            throw FeedFetchException(
-                FeedFetchFailureReason.BLOCKED_RESPONSE, response.code,
-                "Feed request blocked by an anti-bot challenge",
-            )
-        }
-        // 错误页只检查有界前缀；读取错误页失败也必须保留已收到的 HTTP 状态。
-        val preview = try {
-            response.peekBody(64 * 1024L).string()
-        } catch (error: IOException) {
-            if (response.isSuccessful) throw error else ""
-        }
-        val feedRoot = Regex(
-            """(?is)^\uFEFF?\s*(?:(?:<\?.*?\?>|<!--.*?-->)\s*)*<(?:rss|(?:[\w-]+:)?feed|(?:[\w-]+:)?RDF)\b"""
-        ).containsMatchIn(preview)
-        val html = !feedRoot && (
-            response.header("Content-Type").orEmpty().contains("text/html", ignoreCase = true) ||
-                Regex("""(?i)<!doctype\s+html|<html\b|<head\b|<body\b""").containsMatchIn(preview)
-            )
-        val pageTitle = Regex("""(?is)<title\b[^>]*>\s*(.*?)\s*</title>""")
-            .find(preview)?.groupValues?.get(1).orEmpty()
-        // Turnstile 也会嵌入正常页面，不能仅凭脚本域名判为整页验证。
-        val challenge = html && (
-            preview.contains("/cdn-cgi/challenge-platform/", ignoreCase = true) ||
-                preview.contains("cf-chl-", ignoreCase = true) ||
-                pageTitle.matches(Regex("""(?i)Just a moment(?:\.{3}|…)?""")) ||
-                pageTitle.equals("Attention Required! | Cloudflare", ignoreCase = true) ||
-                (preview.contains("challenges.cloudflare.com", ignoreCase = true) &&
-                    pageTitle.matches(Regex("""(?i)(?:Verify you are human|Security verification|Checking your browser)[.!…]*""")))
-            )
-        if (challenge && !response.isSuccessful) throw FeedFetchException(
-            FeedFetchFailureReason.BLOCKED_RESPONSE, response.code,
-            "Feed request blocked by an anti-bot challenge",
-        )
-        if (!response.isSuccessful) throw FeedFetchException(
-            FeedFetchFailureReason.HTTP_ERROR, response.code, "Feed request failed with HTTP ${response.code}",
-        )
-        val json = !feedRoot && (response.header("Content-Type").orEmpty().contains("json", ignoreCase = true) ||
-            preview.trimStart().startsWith('{') || preview.trimStart().startsWith('['))
-        if (!feedRoot && (preview.trimStart().startsWith('{') || preview.trimStart().startsWith('['))) {
-            throw FeedFetchException(
-                FeedFetchFailureReason.UNSUPPORTED_FORMAT, response.code, "Use RSS or Atom output instead of JSON",
-            )
-        }
-        return try {
-            response.body.byteStream().use {
-                parseSyndFeed(it, response.header("Content-Type"), preserveWireFeed)
-            }
-        } catch (error: IOException) {
-            throw error
-        } catch (error: Exception) {
-            // ROME/JDOM 会包装响应体读取异常；断流仍属于连接故障，不能误报为坏 XML。
-            generateSequence(error as Throwable) { it.cause }.take(8)
-                .filterIsInstance<IOException>().firstOrNull()?.let { throw it }
-            // MIME 和有界前缀只是线索：先让 XML reader 验证，兼容错误 MIME、UTF-16 和较长序言。
-            if (challenge) throw FeedFetchException(
-                FeedFetchFailureReason.BLOCKED_RESPONSE, response.code,
-                "Feed request blocked by an anti-bot challenge", error,
-            )
-            if (html) throw FeedFetchException(
-                FeedFetchFailureReason.HTML_RESPONSE, response.code, "Server returned a web page instead of a feed", error,
-            )
-            if (json) throw FeedFetchException(
-                FeedFetchFailureReason.UNSUPPORTED_FORMAT, response.code, "Use RSS or Atom output instead of JSON", error,
-            )
-            throw FeedFetchException(
-                FeedFetchFailureReason.INVALID_CONTENT, response.code, "Feed content is invalid", error,
-            )
-        }
-    }
-
-    /**
-     * 当网页没有声明 alternate Feed 时，尝试行业中最常见的同域名 Feed 路径。
-     * 候选仍会经过真实 XML 解析，错误地址不会被保存。
-     */
-    private fun buildCommonFeedCandidates(inputUrl: String): List<String> {
-        val uri = runCatching { URI(inputUrl) }.getOrNull() ?: return emptyList()
-        val scheme = uri.scheme ?: return emptyList()
-        val authority = uri.rawAuthority ?: return emptyList()
-        val origin = "$scheme://$authority"
-        return listOf(
-            "$origin/feed",
-            "$origin/feed/",
-            "$origin/rss",
-            "$origin/rss.xml",
-            "$origin/atom.xml",
-            "$origin/feed.xml",
-            "$origin/index.xml",
-        )
-    }
-
+    /** 全文提取沿用静态内容与动态页面既定策略。 */
     @Throws(Exception::class)
-    suspend fun parseFullContent(
-        link: String,
-        title: String,
-        allowDynamicFallback: Boolean = true,
-    ): String {
-        return withContext(ioDispatcher) {
-            val uri = runCatching { URI(link) }.getOrNull()
-            if (uri?.scheme !in setOf("http", "https")) {
-                throw FullContentException(
-                    reason = FullContentFailureReason.INVALID_URL,
-                    message = "Unsupported article URL",
-                )
-            }
-
-            // 微信公众号在真实浏览器中可以直接打开，但 OkHttp 即使伪装 Chrome UA，
-            // TLS/HTTP2 指纹仍与 Chromium 不同，先请求一次反而可能触发文章级安全验证。
-            // 前台阅读全文因此直接交给隐藏 WebView，并同步使用移动 Chrome UA 与 Client Hints。
-            // 后台预取仍保持纯 HTTP，不启动 WebView。
-            if (allowDynamicFallback && uri != null && isWeChatArticleUrl(uri)) {
-                val dynamicContent =
-                    runCatching {
-                        dynamicArticleContentService.extract(
-                            url = link,
-                            expectedTitle = title,
-                            staticHtml = "",
-                            staticFailureReason = FullContentFailureReason.ACCESS_RESTRICTED,
-                            allowRestrictedFallback = true,
-                        )
-                    }.getOrNull()
-                if (dynamicContent != null) return@withContext dynamicContent.html
-                throw FullContentException(
-                    reason = FullContentFailureReason.ACCESS_RESTRICTED,
-                    message = "WeChat article remained restricted after browser rendering",
-                )
-            }
-
-            try {
-                val response = articleResponse(okHttpClient, link)
-                if (response.commonIsSuccessful) {
-                    val content =
-                        HttpTextDecoder.decode(
-                            bytes = response.body.bytes(),
-                            contentType = response.header("Content-Type"),
-                            kind = HttpTextKind.HTML,
-                        )
-
-                    val staticContent = contentExtractionService.extract(content, link, title)
-                    if (staticContent != null) return@withContext staticContent.html
-
-                    val staticFailureReason = FullContentFailureClassifier.classifyHtml(content)
-                    val dynamicContent =
-                        if (allowDynamicFallback) {
-                            runCatching {
-                                dynamicArticleContentService.extract(
-                                    url = link,
-                                    expectedTitle = title,
-                                    staticHtml = content,
-                                    staticFailureReason = staticFailureReason,
-                                    allowRestrictedFallback =
-                                        staticFailureReason == FullContentFailureReason.ACCESS_RESTRICTED,
-                                )
-                            }.getOrNull()
-                        } else {
-                            null
-                        }
-                    dynamicContent?.html
-                        ?: throw FullContentException(
-                            reason = staticFailureReason,
-                            message = "No valid article content was extracted",
-                        )
-                } else {
-                    val failureReason = FullContentFailureClassifier.classifyHttpStatus(response.code)
-                    if (
-                        allowDynamicFallback &&
-                            failureReason == FullContentFailureReason.ACCESS_RESTRICTED
-                    ) {
-                        val restrictedHtml = runCatching { response.body.string() }.getOrDefault("")
-                        val dynamicContent =
-                            runCatching {
-                                dynamicArticleContentService.extract(
-                                    url = link,
-                                    expectedTitle = title,
-                                    staticHtml = restrictedHtml,
-                                    staticFailureReason = failureReason,
-                                    allowRestrictedFallback = true,
-                                )
-                            }.getOrNull()
-                        if (dynamicContent != null) return@withContext dynamicContent.html
-                    }
-                    throw FullContentException(
-                        reason = failureReason,
-                        message = "Article request failed with HTTP ${response.code}",
-                    )
-                }
-            } catch (failure: FullContentException) {
-                throw failure
-            } catch (failure: Throwable) {
-                throw FullContentException(
-                    reason = FullContentFailureClassifier.classifyThrowable(failure),
-                    message = "Article request failed",
-                    cause = failure,
-                )
-            }
-        }
-    }
+    suspend fun parseFullContent(link: String, title: String, allowDynamicFallback: Boolean = true): String =
+        extractArticleContent(link, title, allowDynamicFallback)
 
     suspend fun queryRssXml(
         feed: Feed,
         latestLink: String?,
         preDate: Date = Date(),
-    ): List<Article> = queryRssXmlInternal(feed, latestLink, preDate).articles
+    ): List<Article> {
+        val result = queryRssXmlInternal(RssRefreshRequest(feed, latestLink, preDate))
+        result.failure?.let { throw it }
+        return result.articles
+    }
 
     /**
      * 后续刷新专用：携带已保存的 HTTP validator，并把 304 暴露给上层短路整条同步链。
-     * validator 的持久化由 LocalSourceService 负责，RssHelper 只处理 HTTP/XML/CPU。
+     * validator 的持久化由文章入库事务负责，RssHelper 只处理 HTTP/XML/CPU。
      */
     suspend fun queryRssXmlConditional(
         feed: Feed,
@@ -462,13 +116,7 @@ constructor(
         etag: String? = null,
         lastModified: String? = null,
     ): RssQueryResult =
-        queryRssXmlInternal(
-            feed = feed,
-            latestLink = latestLink,
-            preDate = preDate,
-            etag = etag,
-            lastModified = lastModified,
-        )
+        queryRssXmlInternal(RssRefreshRequest(feed, latestLink, preDate, etag, lastModified))
 
     /** RSSHub 刷新沿用条件请求及文章转换，只替换网络策略。普通 RSS 保留原客户端。 */
     suspend fun queryRssHubXmlConditional(
@@ -478,230 +126,33 @@ constructor(
         etag: String? = null,
         lastModified: String? = null,
     ): RssQueryResult = queryRssXmlInternal(
-        feed, latestLink, preDate, etag, lastModified,
+        RssRefreshRequest(feed, latestLink, preDate, etag, lastModified),
         client = rssHubHttpClients.forUrl(feed.url),
     )
 
-    private suspend fun queryRssXmlInternal(
-        feed: Feed,
-        latestLink: String?,
-        preDate: Date,
-        etag: String? = null,
-        lastModified: String? = null,
-        client: OkHttpClient = okHttpClient,
-    ): RssQueryResult =
-        try {
-            val request =
-                Request.Builder()
-                    .url(feed.url)
-                    .apply {
-                        etag?.takeIf { it.isNotBlank() }?.let { header("If-None-Match", it) }
-                        lastModified
-                            ?.takeIf { it.isNotBlank() }
-                            ?.let { header("If-Modified-Since", it) }
-                    }
-                    .build()
 
-            withFeedResponse(client, request) { response ->
-                if (response.code == 304) {
-                    return@withFeedResponse RssQueryResult(
-                        articles = emptyList(),
-                        notModified = true,
-                        successful = true,
-                        etag = response.header("ETag") ?: etag,
-                        lastModified = response.header("Last-Modified") ?: lastModified,
-                    )
-                }
-                val entries =
-                    withContext(ioDispatcher) {
-                        parseFeedResponse(response, preserveWireFeed = true)
-                            .entries
-                            .asSequence()
-                            .takeWhile { latestLink == null || latestLink != it.link }
-                            .toList()
-                    }
-                val articles =
-                    buildArticlesFromSyndEntries(
-                        feed = feed,
-                        accountId = feed.accountId,
-                        entries = entries,
-                        preDate = preDate,
-                    )
-                RssQueryResult(
-                    articles = articles,
-                    etag = response.header("ETag")?.trim()?.takeIf { it.isNotEmpty() },
-                    lastModified =
-                        response.header("Last-Modified")?.trim()?.takeIf { it.isNotEmpty() },
-                )
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Log.e("RLog", "queryRssXml[${feed.name}]: ${e.message}")
-            RssQueryResult(articles = emptyList(), successful = false, failure = e)
-        }
+    /** 按原顺序转换 RSS/Atom，源内身份不与可打开 URL 混用。 */
+    suspend fun buildArticlesFromSyndEntries(feed: Feed, accountId: Int, entries: List<SyndEntry>, preDate: Date = Date()): List<Article> =
+        convertSyndEntries(RssArticleMappingContext(feed, accountId, preDate), entries)
 
-    /**
-     * 大 Feed 的 Readability/DOM 转换是 CPU 工作，不应占用 IO dispatcher 串行跑数百次。
-     * 小 Feed 维持单 worker；大 Feed 最多 4 个分片并发，并按分片原顺序 flatten。
-     */
-    suspend fun buildArticlesFromSyndEntries(
-        feed: Feed,
-        accountId: Int,
-        entries: List<SyndEntry>,
-        preDate: Date = Date(),
-    ): List<Article> =
-        withContext(Dispatchers.Default) {
-            if (entries.size < LARGE_FEED_PARALLEL_THRESHOLD) {
-                return@withContext entries.map { entry ->
-                    buildArticleFromSyndEntry(feed, accountId, entry, preDate)
-                }
-            }
+    /** 转换单条文章，保留已有阅读内容与摘要提取语义。 */
+    fun buildArticleFromSyndEntry(feed: Feed, accountId: Int, syndEntry: SyndEntry, preDate: Date = Date()): Article =
+        convertSyndEntry(RssArticleMappingContext(feed, accountId, preDate), syndEntry)
 
-            val workerCount =
-                minOf(
-                    MAX_RSS_CPU_WORKERS,
-                    Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
-                    entries.size,
-                )
-            if (workerCount <= 1) {
-                return@withContext entries.map { entry ->
-                    buildArticleFromSyndEntry(feed, accountId, entry, preDate)
-                }
-            }
-            val chunkSize = (entries.size + workerCount - 1) / workerCount
-            coroutineScope {
-                entries
-                    .chunked(chunkSize)
-                    .map { chunk ->
-                        async {
-                            chunk.map { entry ->
-                                buildArticleFromSyndEntry(feed, accountId, entry, preDate)
-                            }
-                        }
-                    }
-                    .awaitAll()
-                    .flatten()
-            }
-        }
+    /** RSS enclosure 和媒体模块优先用于缩略图。 */
+    fun findThumbnail(syndEntry: SyndEntry): String? = thumbnailFromEntry(syndEntry)
 
-    fun buildArticleFromSyndEntry(
-        feed: Feed,
-        accountId: Int,
-        syndEntry: SyndEntry,
-        preDate: Date = Date(),
-    ): Article {
-        val desc = syndEntry.description?.value
-        val content =
-            syndEntry.contents
-                .takeIf { it.isNotEmpty() }
-                ?.let { it.joinToString("\n") { it.value } }
-        //        Log.i(
-        //            "RLog",
-        //            "request rss:\n" +
-        //                    "name: ${feed.name}\n" +
-        //                    "feedUrl: ${feed.url}\n" +
-        //                    "url: ${syndEntry.link}\n" +
-        //                    "title: ${syndEntry.title}\n" +
-        //                    "desc: ${desc}\n" +
-        //                    "content: ${content}\n"
-        //        )
-        return Article(
-            id = accountId.spacerDollar(UUID.randomUUID().toString()),
-            accountId = accountId,
-            feedId = feed.id,
-            date =
-                (syndEntry.publishedDate ?: syndEntry.updatedDate)?.takeIf { !it.isFuture(preDate) }
-                    ?: preDate,
-            title = syndEntry.title.decodeHTML() ?: feed.name,
-            author = syndEntry.author,
-            rawDescription = content ?: desc ?: "",
-            shortDescription = Readability.parseToText(desc ?: content, syndEntry.link).take(280),
-            //            fullContent = content,
-            img = findThumbnail(syndEntry) ?: findThumbnail(content ?: desc),
-            link = syndEntry.link ?: "",
-            updateAt = preDate,
-        )
-    }
-
-    fun findThumbnail(syndEntry: SyndEntry): String? {
-        syndEntry.enclosures
-            .orEmpty()
-            .firstNotNullOfOrNull { enclosure ->
-                enclosure.url?.trim()?.takeIf { url -> isImageEnclosure(enclosure.type, url) }
-            }
-            ?.let { return it }
-
-        val mediaModule = syndEntry.getModule(MediaModule.URI) as? MediaEntryModule
-        if (mediaModule != null) {
-            return findThumbnail(mediaModule)
-        }
-
-        return null
-    }
-
-    private fun findThumbnail(mediaModule: MediaEntryModule): String? {
-        val candidates =
-            buildList {
-                    add(mediaModule.metadata)
-                    addAll(mediaModule.mediaGroups.map { mediaGroup -> mediaGroup.metadata })
-                    addAll(mediaModule.mediaContents.map { content -> content.metadata })
-                }
-                .flatMap { it.thumbnail.toList() }
-
-        val thumbnail = candidates.firstOrNull()
-
-        if (thumbnail != null) {
-            return thumbnail.url.toString()
-        } else {
-            val imageMedia = mediaModule.mediaContents.firstOrNull { it.medium == "image" }
-            if (imageMedia != null) {
-                return (imageMedia.reference as? UrlReference)?.url.toString()
-            }
-        }
-        return null
-    }
-
-    fun findThumbnail(text: String?): String? {
-        text ?: return null
-        enclosureTagRegex.findAll(text).forEach { match ->
-            val tag = match.value
-            val url = enclosureUrlRegex.find(tag)?.groupValues?.getOrNull(2)?.trim().orEmpty()
-            val type = enclosureTypeRegex.find(tag)?.groupValues?.getOrNull(2)?.trim()
-            if (url.isNotBlank() && isImageEnclosure(type, url)) {
-                return Parser.unescapeEntities(url, false)
-            }
-        }
-        // From https://gitlab.com/spacecowboy/Feeder
-        // Using negative lookahead to skip data: urls, being inline base64
-        // And capturing original quote to use as ending quote
-        // Base64 encoded images can be quite large - and crash database cursors
-        return imgRegex.find(text)
-            ?.groupValues
-            ?.get(2)
-            // content:encoded 中的 HTML 属性常保留 `&amp;` 等实体。
-            // 若直接把正则结果存进 Article.img，查询参数会变成 `amp;u`，图片代理因此拿不到真实 URL。
-            ?.let { Parser.unescapeEntities(it, false) }
-            ?.takeIf { !it.startsWith("data:") }
-    }
-
-    private fun isImageEnclosure(type: String?, url: String): Boolean {
-        val normalizedType = type?.trim()?.lowercase().orEmpty()
-        if (normalizedType.startsWith("image/")) return true
-        if (normalizedType.isNotEmpty()) return false
-        return runCatching {
-            java.net.URI(url).path.orEmpty().lowercase()
-                .matches(Regex(".*\\.(avif|bmp|gif|jpe?g|png|webp|svg)$"))
-        }.getOrDefault(false)
-    }
+    /** HTML 图像地址解码实体后用于缩略图。 */
+    fun findThumbnail(text: String?): String? = thumbnailFromText(text)
 
     suspend fun queryRssIconLink(feedLink: String?): String? {
         if (feedLink.isNullOrEmpty()) return null
-        val iconFinder = BestIconFinder(okHttpClient)
-        val domain = feedLink.extractDomain()
-        return iconFinder.findBestIcon(domain ?: feedLink).also {
-            Log.i("RLog", "queryRssIconByLink: get $it from $domain")
+        return withContext(ioDispatcher) {
+            val iconFinder = BestIconFinder(okHttpClient)
+            val domain = feedLink.extractDomain()
+            iconFinder.findBestIcon(domain ?: feedLink).also {
+                Log.i("RLog", "queryRssIconByLink: get $it from $domain")
+            }
         }
     }
 
@@ -709,32 +160,19 @@ constructor(
         feedDao.update(feed.copy(icon = iconLink))
     }
 
-    private suspend fun response(client: OkHttpClient, url: String): okhttp3.Response =
-        response(client, Request.Builder().url(url).build())
-
-    private suspend fun response(client: OkHttpClient, request: Request): okhttp3.Response =
-        client.newCall(request).executeAsync()
-
-    /** 普通网页上的 RSS alternate 发现使用浏览器风格 UA，但不携带 WebView Cookie。 */
-    private suspend fun websitePageResponse(client: OkHttpClient, url: String): okhttp3.Response {
-        val request =
-            Request.Builder()
-                .url(url)
-                .header("User-Agent", articleWebSessionManager.desktopHttpUserAgent)
-                .header(
-                    "Accept",
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                )
-                .header("Upgrade-Insecure-Requests", "1")
-                .build()
-        return client.newCall(request).executeAsync()
-    }
+    /** alternate 发现使用浏览器风格 UA，后台发现不携带 WebView Cookie。 */
+    internal fun websitePageRequest(url: String): Request = Request.Builder()
+        .url(url)
+        .header("User-Agent", articleWebSessionManager.desktopHttpUserAgent)
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        .header("Upgrade-Insecure-Requests", "1")
+        .build()
 
     /**
      * 正文网页使用浏览器风格请求头，并复用用户在内置 WebView 中已经取得的站点 Cookie。
      * Feed/XML 请求仍走普通 response()，避免把网页登录状态扩散到后台订阅同步链。
      */
-    private suspend fun articleResponse(client: OkHttpClient, url: String): okhttp3.Response {
+    internal fun articleRequest(url: String): Request {
         val request =
             Request.Builder()
                 .url(url)
@@ -750,40 +188,7 @@ constructor(
                     }
                 }
                 .build()
-        return client.newCall(request).executeAsync()
+        return request
     }
 
-    /** 微信公众号单篇文章前台直接使用浏览器渲染，避免 OkHttp 预请求先触发风控。 */
-    private fun isWeChatArticleUrl(uri: URI): Boolean {
-        val host = uri.host.orEmpty().lowercase()
-        return host == WECHAT_ARTICLE_HOST || host.endsWith(".$WECHAT_ARTICLE_HOST")
-    }
-
-    private companion object {
-        const val WECHAT_ARTICLE_HOST = "mp.weixin.qq.com"
-        const val LARGE_FEED_PARALLEL_THRESHOLD = 80
-        const val MAX_RSS_CPU_WORKERS = 4
-    }
 }
-
-/**
- * ROME Feed 解析统一入口。
- *
- * HTTP 明确声明 charset 时尊重响应头；若响应头没有 charset，则不要人为补 UTF-8，
- * 交给 XmlReader 从 BOM / XML declaration 中识别实际编码。这样既兼容 GBK Feed，
- * 又保留大 RSS 刷新时的流式解析能力。
- */
-internal fun parseSyndFeed(
-    inputStream: InputStream,
-    contentType: String?,
-    preserveWireFeed: Boolean = false,
-): SyndFeed =
-    SyndFeedInput()
-        .apply { isPreserveWireFeed = preserveWireFeed }
-        .build(
-            if (contentType?.contains("charset=", ignoreCase = true) == true) {
-                XmlReader(inputStream, contentType)
-            } else {
-                XmlReader(inputStream)
-            }
-        )

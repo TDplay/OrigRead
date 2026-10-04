@@ -20,6 +20,7 @@ data class SubscribeSourceCandidate(
     val dynamicRendering: Boolean = false,
     val etag: String? = null,
     val lastModified: String? = null,
+    val jsonProbe: me.ash.reader.infrastructure.json.JsonSourceProbeResult? = null,
     val rssHubRoutePath: String? = null,
     /** 用户显式输入的 RSSHub 实例；rsshub:// 与 Radar 发现均为 null。 */
     val rssHubPreferredInstanceBaseUrl: String? = null,
@@ -38,6 +39,7 @@ internal data class SubscribeCandidateProbe(
     val dynamicRendering: Boolean = false,
     val etag: String? = null,
     val lastModified: String? = null,
+    val jsonProbe: me.ash.reader.infrastructure.json.JsonSourceProbeResult? = null,
     val rssHubRoutePath: String? = null,
     val rssHubPreferredInstanceBaseUrl: String? = null,
     val rssHubInstanceBaseUrl: String? = null,
@@ -78,6 +80,7 @@ internal object SubscribeCandidateSelector {
                     dynamicRendering = candidate.dynamicRendering,
                     etag = candidate.etag,
                     lastModified = candidate.lastModified,
+                    jsonProbe = candidate.jsonProbe,
                     rssHubRoutePath = candidate.rssHubRoutePath,
                     rssHubPreferredInstanceBaseUrl = candidate.rssHubPreferredInstanceBaseUrl,
                     rssHubInstanceBaseUrl = candidate.rssHubInstanceBaseUrl,

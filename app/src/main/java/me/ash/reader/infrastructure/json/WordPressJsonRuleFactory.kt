@@ -49,6 +49,7 @@ object WordPressJsonRuleFactory {
             descriptionPath = "$.content.rendered",
             idPath = "$.id",
             dateFormat = "yyyy-MM-dd'T'HH:mm:ss",
+            dateTimeZone = "UTC",
             maxItems = 30,
         )
     }

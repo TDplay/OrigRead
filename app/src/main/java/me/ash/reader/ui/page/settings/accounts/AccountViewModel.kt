@@ -80,9 +80,10 @@ class AccountViewModel @Inject constructor(
         _accountUiState.update { it.copy(clearDialogVisible = false) }
     }
 
+    /** 只在实际删除后触发页面返回和成功提示，拒绝删除时保留当前页面。 */
     fun delete(accountId: Int, callback: () -> Unit = {}) {
         viewModelScope.launch(ioDispatcher) {
-            accountService.delete(accountId)
+            if (!accountService.delete(accountId)) return@launch
             withContext(mainDispatcher) {
                 callback()
             }

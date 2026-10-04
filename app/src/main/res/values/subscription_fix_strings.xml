@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="subscription_batch_result">Added %1$d, already subscribed %2$d, failed %3$d.</string>
+    <string name="subscription_account_changed">Account changed. Search for the source again before subscribing.</string>
+    <string name="opml_import_result">Imported %1$d sources; skipped %2$d duplicates. Nested folders use their full paths as group names.</string>
+    <string name="opml_import_failed">OPML import failed: %1$s</string>
+    <string name="opml_export_rss_only_notice">OPML exports RSS, Atom and RSSHub feeds only. Website and JSON sources are skipped. Use a full configuration backup to transfer them and their parsing rules.</string>
+</resources>

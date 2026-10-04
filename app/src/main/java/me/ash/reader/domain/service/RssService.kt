@@ -2,6 +2,7 @@ package me.ash.reader.domain.service
 
 import com.rometools.rome.feed.synd.SyndFeed
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.stateIn
 import me.ash.reader.domain.model.account.AccountType
 import me.ash.reader.infrastructure.di.ApplicationScope
 
+@Singleton
 class RssService
 @Inject
 constructor(
@@ -31,109 +33,24 @@ constructor(
 
     fun get() = get(accountService.getCurrentAccount().type.id)
 
+    /** 后台任务按输入账户选择协议，避免 UI 账户切换改变排队任务归属。 */
+    suspend fun forAccount(accountId: Int): AbstractRssRepository {
+        val account = requireNotNull(accountService.getAccountById(accountId)) { "账户不存在：$accountId" }
+        return get(account.type.id)
+    }
+
+    /** 订阅页已经固定目标账户；按它选择服务，实际落库处再校验分组归属。 */
+    suspend fun subscribe(request: SubscriptionRequest): SubscriptionResult {
+        val service = forAccount(request.accountId)
+        require(service.addSubscription) { "此账户不支持添加订阅" }
+        if (request.sourceType != me.ash.reader.domain.model.feed.SourceType.RSS || request.rssHub != null) {
+            require(service === localRssService) { "网站、JSON 和 RSSHub 配置只支持本地账户" }
+        }
+        return service.subscribe(request)
+    }
+
     fun flow() = currentServiceFlow
 
-    /** Local RSS 首次订阅可把探测阶段的 HTTP validator 一并保存，下一次刷新直接走条件请求。 */
-    suspend fun subscribeLocalRss(
-        feedLink: String,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-        etag: String?,
-        lastModified: String?,
-    ) {
-        require(accountService.getCurrentAccount().type.id == AccountType.Local.id) {
-            "Local RSS validator cache is only supported for local accounts"
-        }
-        localRssService.subscribeWithHttpValidators(
-            feedLink = feedLink,
-            searchedFeed = searchedFeed,
-            groupId = groupId,
-            isNotification = isNotification,
-            isFullContent = isFullContent,
-            isBrowser = isBrowser,
-            etag = etag,
-            lastModified = lastModified,
-        )
-    }
-
-    /**
-     * 普通网站来源仅保存到本地账户，避免同步到第三方 RSS 服务。
-     */
-    suspend fun subscribeWebsite(
-        feedLink: String,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-    ): String {
-        require(accountService.getCurrentAccount().type.id == AccountType.Local.id) {
-            "Website sources are only supported for local accounts"
-        }
-        return localRssService.subscribeWebsite(
-            feedLink = feedLink,
-            searchedFeed = searchedFeed,
-            groupId = groupId,
-            isNotification = isNotification,
-            isFullContent = isFullContent,
-            isBrowser = isBrowser,
-        )
-    }
-
-    /** RSSHub 来源仅支持本地账户，并额外保存原始页面 URL 用于失效回退。 */
-    suspend fun subscribeRssHub(
-        feedLink: String,
-        sourcePageUrl: String,
-        routePath: String? = null,
-        preferredInstance: String? = null,
-        resolvedInstance: String? = null,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-    ): String {
-        require(accountService.getCurrentAccount().type.id == AccountType.Local.id) {
-            "RSSHub sources are only supported for local accounts"
-        }
-        return localRssService.subscribeRssHub(
-            feedLink = feedLink,
-            sourcePageUrl = sourcePageUrl,
-            routePath = routePath,
-            preferredInstance = preferredInstance,
-            resolvedInstance = resolvedInstance,
-            searchedFeed = searchedFeed,
-            groupId = groupId,
-            isNotification = isNotification,
-            isFullContent = isFullContent,
-            isBrowser = isBrowser,
-        )
-    }
-
-    /** JSON/API 来源仅支持本地账户。 */
-    suspend fun subscribeJson(
-        feedLink: String,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-    ) {
-        require(accountService.getCurrentAccount().type.id == AccountType.Local.id) {
-            "JSON sources are only supported for local accounts"
-        }
-        localRssService.subscribeJson(
-            feedLink = feedLink,
-            searchedFeed = searchedFeed,
-            groupId = groupId,
-            isNotification = isNotification,
-            isFullContent = isFullContent,
-            isBrowser = isBrowser,
-        )
-    }
 
     fun get(accountTypeId: Int) =
         when (accountTypeId) {

@@ -13,6 +13,7 @@ import org.mockito.Mock
 import org.mockito.junit.MockitoJUnitRunner
 import org.mockito.kotlin.mock
 
+/** 标准 OPML 包络，节点内容由各用例提供。 */
 internal const val OPML_TEMPLATE: String = """
 <opml version="1.0">
     <head>
@@ -91,5 +92,22 @@ class OPMLDataSourceTest {
         Assert.assertFalse(feed.isFullContent)
         Assert.assertFalse(feed.isBrowser)
         Assert.assertTrue(feed.isNotification)
+    }
+
+    /** 深层目录不得遗漏，跨组重复地址以文件首次出现的位置归属。 */
+    @Test
+    fun `recursive folders and duplicate urls preserve first occurrence`() {
+        val result = parse(fill("""
+            <outline text="Parent"><outline text="Child"><outline text="Grandchild">
+              <outline type="rss" xmlUrl="https://example.com/feed" text="First" />
+            </outline></outline></outline>
+            <outline text="Other"><outline type="rss" xmlUrl="https://example.com/feed" text="Duplicate" /></outline>
+            <outline isDefault="true" text="Default"><outline type="rss" xmlUrl="https://example.com/feed/" text="Slash" /></outline>
+        """))
+        val nested = result.single { it.group.name == "Parent / Child / Grandchild" }
+        Assert.assertEquals("First", nested.feeds.single().name)
+        Assert.assertEquals(defaultGroup.id, result.first().group.id)
+        Assert.assertEquals("https://example.com/feed/", result.first().feeds.single().url)
+        Assert.assertEquals(2, result.sumOf { it.feeds.size })
     }
 }

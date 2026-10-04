@@ -10,6 +10,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import me.ash.reader.domain.model.feed.Feed
+import me.ash.reader.domain.model.feed.SourceType
 import me.ash.reader.domain.repository.FeedDao
 import me.ash.reader.domain.repository.GroupDao
 import me.ash.reader.infrastructure.di.IODispatcher
@@ -41,26 +42,14 @@ class OpmlService @Inject constructor(
      * @param [inputStream] input stream of OPML file
      */
     @Throws(Exception::class)
-    suspend fun saveToDatabase(inputStream: InputStream) {
+    suspend fun saveToDatabase(inputStream: InputStream, accountId: Int = accountService.getCurrentAccountId()): OpmlImportResult =
         withContext(ioDispatcher) {
-            val defaultGroup = groupDao.queryById(getDefaultGroupId(context.currentAccountId))!!
-            val groupWithFeedList =
-                OPMLDataSource.parseFileInputStream(inputStream, defaultGroup, context.currentAccountId)
-            groupWithFeedList.forEach { groupWithFeed ->
-                if (groupWithFeed.group != defaultGroup) {
-                    groupDao.insert(groupWithFeed.group)
-                }
-                val repeatList = mutableListOf<Feed>()
-                groupWithFeed.feeds.forEach {
-                    it.groupId = groupWithFeed.group.id
-                    if (rssService.get().isFeedExist(it.url)) {
-                        repeatList.add(it)
-                    }
-                }
-                feedDao.insertList((groupWithFeed.feeds subtract repeatList.toSet()).toList())
-            }
+            val service = rssService.forAccount(accountId)
+            require(service.importSubscription && service is LocalRssService) { "此账户不支持 OPML 导入" }
+            val defaultGroup = requireNotNull(groupDao.queryById(getDefaultGroupId(accountId))) { "导入账户默认分组不存在" }
+            val document = OPMLDataSource.parseDocument(inputStream, defaultGroup, accountId)
+            service.importOpml(accountId, document)
         }
-    }
 
     /**
      * Exports OPML file.
@@ -72,7 +61,7 @@ class OpmlService @Inject constructor(
             Opml(
                 "2.0",
                 Head(
-                    accountService.getCurrentAccount().name,
+                    requireNotNull(accountService.getAccountById(accountId)).name,
                     Date().toString(), null, null, null,
                     null, null, null, null,
                     null, null, null, null,
@@ -87,11 +76,12 @@ class OpmlService @Inject constructor(
                                 put("isDefault", (it.group.id == defaultGroup?.id).toString())
                             }
                         },
-                        it.feeds.map { feed ->
+                        it.feeds.filter { feed -> feed.sourceType == SourceType.RSS }.map { feed ->
                             Outline(
                                 mutableMapOf(
                                     "text" to feed.name,
                                     "title" to feed.name,
+                                    "type" to "rss",
                                     "xmlUrl" to feed.url,
                                     "htmlUrl" to feed.url
                                 ).apply {
@@ -112,3 +102,6 @@ class OpmlService @Inject constructor(
 
     private fun getDefaultGroupId(accountId: Int): String = accountId.getDefaultGroupId()
 }
+
+/** 导入结果用于清楚区分新增与批次内/已有订阅重复跳过。 */
+data class OpmlImportResult(val importedCount: Int, val duplicateCount: Int)

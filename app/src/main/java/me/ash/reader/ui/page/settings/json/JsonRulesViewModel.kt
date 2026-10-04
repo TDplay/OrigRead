@@ -3,6 +3,8 @@ package me.ash.reader.ui.page.settings.json
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.InputStream
+import java.io.OutputStream
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +25,8 @@ import me.ash.reader.infrastructure.di.IODispatcher
 import me.ash.reader.infrastructure.di.MainDispatcher
 import me.ash.reader.infrastructure.json.JsonRule
 import me.ash.reader.infrastructure.json.JsonRuleRepository
+import me.ash.reader.ui.page.settings.readRuleDocument
+import me.ash.reader.ui.page.settings.writeRuleDocument
 
 data class JsonRulesUiState(
     val rules: List<JsonRule> = emptyList(),
@@ -71,23 +75,39 @@ class JsonRulesViewModel @Inject constructor(
         }
     }
 
-    fun reload() {
-        _uiState.update { it.copy(rules = repository.listRules()) }
+    /** 发布规则列表；导入时传入 IO 线程已读取的列表，避免在主线程重新读文件。 */
+    fun reload(rules: List<JsonRule> = repository.listRules()) {
+        _uiState.update { it.copy(rules = rules) }
     }
 
-    fun importRules(bytes: ByteArray, callback: (Result<Int>) -> Unit) {
+    /** IO 线程负责打开、读取、解析、保存和重读规则，主线程只发布结果。 */
+    fun importRules(openInput: () -> InputStream?, callback: (Result<Int>) -> Unit) {
         viewModelScope.launch(ioDispatcher) {
-            val result = runCatching { repository.importRules(String(bytes, Charsets.UTF_8)) }
+            val result = readRuleDocument(openInput) { content ->
+                repository.importRules(content) to repository.listRules()
+            }
             withContext(mainDispatcher) {
-                reload()
-                callback(result)
+                result.onSuccess { reload(it.second) }
+                callback(result.map { it.first })
             }
         }
     }
 
-    fun exportRules(callback: (String) -> Unit) = callback(repository.exportRules())
+    /** 导出原规则格式；文档提供方调用、序列化和流关闭均在 IO 线程完成。 */
+    fun exportRules(openOutput: () -> OutputStream?, callback: (Result<Unit>) -> Unit) {
+        viewModelScope.launch(ioDispatcher) {
+            val result = writeRuleDocument(openOutput, repository::exportRules)
+            withContext(mainDispatcher) { callback(result) }
+        }
+    }
 
-    fun exportTemplate(callback: (String) -> Unit) = callback(repository.exportTemplate())
+    /** 模板与普通导出使用相同的文件生命周期和错误反馈。 */
+    fun exportTemplate(openOutput: () -> OutputStream?, callback: (Result<Unit>) -> Unit) {
+        viewModelScope.launch(ioDispatcher) {
+            val result = writeRuleDocument(openOutput, repository::exportTemplate)
+            withContext(mainDispatcher) { callback(result) }
+        }
+    }
 
     fun setEnabled(rule: JsonRule, enabled: Boolean) {
         repository.setEnabled(rule.id, enabled)

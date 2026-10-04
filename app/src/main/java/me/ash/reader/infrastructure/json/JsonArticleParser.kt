@@ -5,6 +5,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.TimeZone
 import javax.inject.Inject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -58,8 +59,9 @@ class JsonArticleParser @Inject constructor() {
         val stableId = stringValue(item, rule.idPath).orEmpty().ifBlank { link }
 
         return Article(
-            id = feed.accountId.spacerDollar(stableId.ifBlank { UUID.randomUUID().toString() }),
-            date = parseDate(SimpleJsonPath.first(item, rule.datePath), rule.dateFormat, fetchedAt),
+            // 上游编号只在当前来源内唯一；新文章按来源生成身份，已有记录仍按链接保留原 ID。
+            id = feed.accountId.spacerDollar(UUID.nameUUIDFromBytes("${feed.id}\u0000$stableId".toByteArray()).toString()),
+            date = parseDate(SimpleJsonPath.first(item, rule.datePath), rule, fetchedAt),
             title = title,
             author = stringValue(item, rule.authorPath)?.toPlainText()?.ifBlank { null },
             rawDescription = content.ifBlank { description },
@@ -80,7 +82,8 @@ class JsonArticleParser @Inject constructor() {
     /** WordPress rendered 字段等可能携带 HTML 与实体，标题和作者统一转为纯文本。 */
     private fun String.toPlainText(): String = Jsoup.parse(this).text().trim()
 
-    private fun parseDate(value: JsonElement?, format: String?, fallback: Date): Date {
+    /** 只为规则明确声明的日期指定时区，带偏移格式仍由文本自身决定。 */
+    private fun parseDate(value: JsonElement?, rule: JsonRule, fallback: Date): Date {
         val primitive = value as? JsonPrimitive ?: return fallback
         primitive.longOrNull?.let { number ->
             val millis = if (number < 10_000_000_000L) number * 1000 else number
@@ -88,11 +91,14 @@ class JsonArticleParser @Inject constructor() {
         }
         val text = primitive.contentOrNull?.trim().orEmpty()
         if (text.isBlank()) return fallback
-        val formats = listOfNotNull(format, "yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd")
+        val formats = listOfNotNull(rule.dateFormat, "yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd")
         return formats.asSequence()
             .mapNotNull { pattern ->
                 runCatching {
-                    SimpleDateFormat(pattern, Locale.getDefault()).apply { isLenient = false }.parse(text)
+                    SimpleDateFormat(pattern, Locale.getDefault()).apply {
+                        isLenient = false
+                        rule.dateTimeZone?.let { timeZone = TimeZone.getTimeZone(it) }
+                    }.parse(text)
                 }.getOrNull()
             }
             .firstOrNull() ?: fallback

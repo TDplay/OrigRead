@@ -10,6 +10,9 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -48,26 +51,31 @@ import me.ash.reader.ui.ext.formatUrl
 class SubscribeViewModel
 @Inject
 constructor(
-    private val opmlService: OpmlService,
+    internal val opmlService: OpmlService,
     val rssService: RssService,
-    private val rssHelper: RssHelper,
-    private val rssHubResolver: RssHubResolver,
-    private val rssHubSettingsRepository: RssHubSettingsRepository,
-    private val websiteHelper: WebsiteHelper,
-    private val jsonSourceHelper: JsonSourceHelper,
-    private val feedDiscoveryCatalog: FeedDiscoveryCatalog,
-    private val androidStringsHelper: AndroidStringsHelper,
-    @ApplicationScope private val applicationScope: CoroutineScope,
-    private val accountService: AccountService,
+    internal val rssHelper: RssHelper,
+    internal val rssHubResolver: RssHubResolver,
+    internal val rssHubSettingsRepository: RssHubSettingsRepository,
+    internal val websiteHelper: WebsiteHelper,
+    internal val jsonSourceHelper: JsonSourceHelper,
+    internal val feedDiscoveryCatalog: FeedDiscoveryCatalog,
+    internal val androidStringsHelper: AndroidStringsHelper,
+    @ApplicationScope internal val applicationScope: CoroutineScope,
+    internal val accountService: AccountService,
 ) : ViewModel() {
 
     /** 防止 Idle 状态到 Fetching 状态之间的极短窗口被连续点击启动两套发现链。 */
-    private var searchCoordinatorJob: Job? = null
+    internal var searchCoordinatorJob: Job? = null
+    /** 所有订阅、分组和导入任务共享账户生命周期，切账户时完整取消在途操作。 */
+    internal val accountOperationScope = CoroutineScope(
+        applicationScope.coroutineContext + SupervisorJob(applicationScope.coroutineContext[Job]),
+    )
+    private var observedAccountId: Int? = null
 
-    private val _subscribeUiState = MutableStateFlow(SubscribeUiState())
+    internal val _subscribeUiState = MutableStateFlow(SubscribeUiState())
     val subscribeUiState: StateFlow<SubscribeUiState> = _subscribeUiState.asStateFlow()
 
-    private val _subscribeState: MutableStateFlow<SubscribeState> =
+    internal val _subscribeState: MutableStateFlow<SubscribeState> =
         MutableStateFlow(SubscribeState.Hidden)
     val subscribeState = _subscribeState.asStateFlow()
 
@@ -75,7 +83,10 @@ constructor(
 
     init {
         viewModelScope.launch {
-            accountService.currentAccountFlow.collectLatest {
+            accountService.currentAccountFlow.collectLatest { account ->
+                val accountId = account?.id
+                if (observedAccountId != null && observedAccountId != accountId) invalidateAccountDiscovery()
+                observedAccountId = accountId
                 rssService.get().pullGroups().collect { groupsFlow.value = it }
             }
         }
@@ -83,7 +94,9 @@ constructor(
             groupsFlow.collect { groups ->
                 _subscribeState.update {
                     when (it) {
-                        is SubscribeState.Configure -> it.copy(groups = groups)
+                        is SubscribeState.Configure -> it.copy(
+                            groups = groups.filter { group -> group.accountId == it.accountId },
+                        )
                         else -> it
                     }
                 }
@@ -95,12 +108,11 @@ constructor(
         cancelSearch()
     }
 
-    fun importFromInputStream(inputStream: InputStream) {
-        applicationScope.launch {
-            opmlService.saveToDatabase(inputStream)
-            rssService.get().doSyncOneTime()
-        }
-    }
+    /** 导入任务固定账户并向现有消息出口报告结果。 */
+    fun importFromInputStream(inputStream: InputStream) = importSubscriptionFile { inputStream }
+
+    /** 文件选择后的打开错误也进入同一个导入反馈出口。 */
+    fun importFromProvider(openStream: () -> InputStream) = importSubscriptionFile(openStream)
 
     fun selectedGroup(groupId: String) {
         _subscribeState.update {
@@ -111,18 +123,8 @@ constructor(
         }
     }
 
-    fun addNewGroup() {
-        if (_subscribeUiState.value.newGroupContent.isNotBlank()) {
-            applicationScope.launch {
-                // TODO: How to add a single group without no feeds via Google Reader API?
-                selectedGroup(
-                    rssService.get().addGroup(null, _subscribeUiState.value.newGroupContent)
-                )
-                hideNewGroupDialog()
-                _subscribeUiState.update { it.copy(newGroupContent = "") }
-            }
-        }
-    }
+    /** 分组创建沿用候选账户，失败通过现有操作消息反馈。 */
+    fun addNewGroup() = createSubscriptionGroup()
 
     fun toggleParseFullContentPreset() {
         _subscribeState.update { state ->
@@ -155,471 +157,15 @@ constructor(
         }
     }
 
-    fun searchFeed() {
-        if (searchCoordinatorJob?.isActive == true) return
-        val currentState = _subscribeState.value
-        if (currentState !is SubscribeState.Idle) return
-        searchCoordinatorJob = viewModelScope.launch {
-            val rawInput = currentState.linkState.text.trim().toString()
-            val knownInstances =
-                runCatching { rssHubSettingsRepository.current().instances.map { it.url } }
-                    .getOrDefault(emptyList())
-            val explicitRssHubInput = RssHubInputParser.parseExplicit(rawInput, knownInstances)
-            if (rawInput.startsWith("rsshub:", ignoreCase = true) && explicitRssHubInput == null) {
-                _subscribeState.value = currentState.copy(
-                    errorMessage = androidStringsHelper.getString(R.string.rsshub_invalid_input_notice),
-                )
-                return@launch
-            }
-            val feedLink = explicitRssHubInput?.preferredInstance?.let { instance ->
-                RssHubInputParser.buildFeedUrl(instance, explicitRssHubInput.routePath)
-            } ?: if (explicitRssHubInput != null) rawInput else rawInput.formatUrl()
-            currentState.linkState.edit { this.replace(0, length, feedLink) }
-
-            val knownRssHubEndpoint = explicitRssHubInput != null
-            val inputHint = sourceInputHint(feedLink)
-
-            // Catalog 是现有来源发现链之前的“可选本地知识”。目录读取/匹配失败绝不能阻断旧链。
-            // 已知 RSSHub route 是唯一无需目录辅助的硬分支；其余 URL 即使看起来像 RSS/JSON 也只是 Hint。
-            val catalogMatch =
-                if (knownRssHubEndpoint) {
-                    FeedCatalogUrlMatch()
-                } else {
-                    runCatching { feedDiscoveryCatalog.matchUrl(feedLink) }
-                        .getOrNull() ?: FeedCatalogUrlMatch()
-                }
-            val discoveryIdleState =
-                currentState.copy(
-                    catalogMatches = catalogMatch.suggestions,
-                    catalogMatchCount = catalogMatch.totalSuggestions,
-                )
-
-            // 保持旧语义：这里只检查用户实际输入的地址。不能因为目录映射到一个已订阅 Feed，
-            // 就阻止用户继续按 Website / RSSHub / JSON 等原有方式探测同一个站点。
-            if (rssService.get().isFeedExist(feedLink)) {
-                _subscribeState.value =
-                    discoveryIdleState.copy(
-                        errorMessage = androidStringsHelper.getString(R.string.already_subscribed)
-                    )
-                return@launch
-            }
-            val groups = groupsFlow.value
-            val firstGroupId = groups.firstOrNull()?.id ?: return@launch
-
-            val job =
-                viewModelScope.launch(start = CoroutineStart.LAZY) {
-                    try {
-                        val isLocalAccount =
-                            accountService.getCurrentAccount().type.id == AccountType.Local.id
-                        if (knownRssHubEndpoint) {
-                            val explicit = requireNotNull(explicitRssHubInput)
-                            val rssHubResults =
-                                runSuspendCatching {
-                                    withTimeout(20_000) {
-                                        // 关闭 RSSHub 时远端账户仍可订阅指定 HTTP 地址；
-                                        // 开启时与 logical 输入共用探测、回退和本地化诊断。
-                                        if (!isLocalAccount && explicit.preferredInstance != null &&
-                                            !rssHubSettingsRepository.current().enabled) {
-                                            listOf(rssHubResolver.probeExplicitRoute(
-                                                explicit.routePath, explicit.preferredInstance,
-                                            ))
-                                        } else {
-                                            rssHubResolver.probeRoute(
-                                                routePath = explicit.routePath,
-                                                preferredInstance = explicit.preferredInstance,
-                                            )
-                                        }
-                                    }
-                                }.getOrDefault(emptyList())
-                            val available = rssHubResults.firstOrNull { it.available }
-                            if (available?.feed != null && available.match.feedUrl != null) {
-                                applyBestCandidate(
-                                    candidates =
-                                        listOf(
-                                            SubscribeCandidateProbe(
-                                                feed = available.feed,
-                                                feedLink = available.match.feedUrl,
-                                                sourceType = SourceType.RSS,
-                                                kind =
-                                                    if (isLocalAccount) {
-                                                        SourceCandidateKind.RSSHUB
-                                                    } else {
-                                                        // 远端账号不能使用 Local-only RSSHub 持久化；
-                                                        // 但实例 route 本身仍是标准 RSS URL，可作为普通 RSS 订阅。
-                                                        SourceCandidateKind.RSS_DIRECT
-                                                    },
-                                                rssHubRoutePath = explicit.routePath,
-                                                rssHubPreferredInstanceBaseUrl = explicit.preferredInstance,
-                                                rssHubInstanceBaseUrl = available.instanceBaseUrl,
-                                            )
-                                        ),
-                                    idleState = discoveryIdleState,
-                                    firstGroupId = firstGroupId,
-                                    lastError = null,
-                                    rssHubResults = rssHubResults,
-                                )
-                                return@launch
-                            }
-
-                            _subscribeState.value =
-                                discoveryIdleState.copy(
-                                    errorMessage = explicitRssHubFailureNotice(rssHubResults),
-                                    rssHubResults = rssHubResults,
-                                )
-                            return@launch
-                        }
-
-                        val candidates = mutableListOf<SubscribeCandidateProbe>()
-                        var lastError: Throwable? = null
-                        val supportsExtendedSources = isLocalAccount
-
-                        suspend fun probeJson(): Boolean {
-                            if (!supportsExtendedSources) return false
-                            updateSearchStage(SearchStage.CHECKING_JSON)
-                            return runSuspendCatching { jsonSourceHelper.probe(feedLink) }
-                                .onFailure { lastError = it }
-                                .getOrNull()
-                                ?.let { jsonSource ->
-                                    candidates +=
-                                        SubscribeCandidateProbe(
-                                            feed = jsonSource.feed,
-                                            feedLink = jsonSource.endpointUrl,
-                                            sourceType = SourceType.JSON,
-                                            kind = SourceCandidateKind.JSON,
-                                        )
-                                    true
-                                } ?: false
-                        }
-
-                        suspend fun probeRss(): Boolean {
-                            updateSearchStage(SearchStage.CHECKING_RSS)
-                            val catalogProbe =
-                                catalogMatch.preferredProbeUrl(feedLink)?.let { catalogFeedUrl ->
-                                    async {
-                                        runSuspendCatching {
-                                            withTimeout(20_000) { rssHelper.discoverFeed(catalogFeedUrl) }
-                                        }
-                                    }
-                                }
-
-                            val directRssResult =
-                                runSuspendCatching { withTimeout(20_000) { rssHelper.discoverFeed(feedLink) } }
-                            directRssResult
-                                .onSuccess { discovered ->
-                                    candidates +=
-                                        SubscribeCandidateProbe(
-                                            feed = discovered.feed,
-                                            feedLink = discovered.feedUrl,
-                                            sourceType = SourceType.RSS,
-                                            kind =
-                                                if (discovered.discoveredFromPage) {
-                                                    SourceCandidateKind.RSS_DISCOVERED
-                                                } else {
-                                                    SourceCandidateKind.RSS_DIRECT
-                                                },
-                                            etag = discovered.etag,
-                                            lastModified = discovered.lastModified,
-                                        )
-                                }.onFailure { lastError = it }
-
-                            catalogProbe?.let { probe ->
-                                val directRssAccepted = SubscribeCandidateSelector.hasConfirmedRss(candidates)
-                                if (!directRssAccepted && probe.isCompleted) {
-                                    probe.await().onSuccess { discovered ->
-                                        candidates +=
-                                            SubscribeCandidateProbe(
-                                                feed = discovered.feed,
-                                                feedLink = discovered.feedUrl,
-                                                sourceType = SourceType.RSS,
-                                                kind = SourceCandidateKind.RSS_DIRECT,
-                                                etag = discovered.etag,
-                                                lastModified = discovered.lastModified,
-                                            )
-                                    }
-                                } else {
-                                    probe.cancel()
-                                }
-                            }
-                            return SubscribeCandidateSelector.hasConfirmedRss(candidates)
-                        }
-
-                        // Hint 只改变 RSS / JSON 谁先尝试；只有真实解析成功后才确认类型并短路。
-                        val structuredSourceFound =
-                            if (inputHint == SourceInputHint.JSON_LIKELY && supportsExtendedSources) {
-                                probeJson() || probeRss()
-                            } else {
-                                probeRss() || probeJson()
-                            }
-                        if (structuredSourceFound) {
-                            applyBestCandidate(candidates, discoveryIdleState, firstGroupId, lastError)
-                            return@launch
-                        }
-
-                        if (!supportsExtendedSources) {
-                            applyBestCandidate(candidates, discoveryIdleState, firstGroupId, lastError)
-                            return@launch
-                        }
-
-                        updateSearchStage(SearchStage.CHECKING_RSSHUB)
-                        val localRssHubResults =
-                            runCatching { rssHubResolver.localRouteDiagnostics(feedLink) }
-                                .getOrDefault(emptyList())
-                        val probedRssHubResults =
-                            runSuspendCatching { rssHubResolver.probe(feedLink) }
-                                .onFailure { lastError = it }
-                                .getOrDefault(emptyList())
-                        val rssHubResults =
-                            mergeRssHubProbeResults(
-                                local = localRssHubResults,
-                                probed = probedRssHubResults,
-                            )
-                        rssHubResults.filter { it.available }.forEach { result ->
-                            val feed = result.feed ?: return@forEach
-                            val rssHubUrl = result.match.feedUrl ?: return@forEach
-                            candidates +=
-                                SubscribeCandidateProbe(
-                                    feed = feed,
-                                    feedLink = rssHubUrl,
-                                    sourceType = SourceType.RSS,
-                                    kind = SourceCandidateKind.RSSHUB,
-                                    sourceNotice =
-                                        androidStringsHelper.getString(
-                                            R.string.rsshub_source_notice,
-                                            result.match.route.name,
-                                        ),
-                                    rssHubRoutePath = result.routePath,
-                                    rssHubInstanceBaseUrl = result.instanceBaseUrl,
-                                )
-                        }
-                        val rssHubNotice = rssHubFailureNotice(rssHubResults)
-
-                        if (candidates.any { it.kind == SourceCandidateKind.RSSHUB }) {
-                            applyBestCandidate(
-                                candidates = candidates,
-                                idleState = discoveryIdleState,
-                                firstGroupId = firstGroupId,
-                                lastError = lastError,
-                                fallbackMessage = rssHubNotice,
-                                rssHubResults = rssHubResults,
-                            )
-                            return@launch
-                        }
-
-                        updateSearchStage(SearchStage.CHECKING_WEBSITE)
-                        runSuspendCatching { withTimeout(15_000) { websiteHelper.inspect(feedLink) } }
-                            .onSuccess { website ->
-                                candidates +=
-                                    SubscribeCandidateProbe(
-                                        feed = website,
-                                        feedLink = feedLink,
-                                        sourceType = SourceType.WEBSITE,
-                                        kind = SourceCandidateKind.WEBSITE,
-                                        sourceNotice = rssHubNotice,
-                                        browser = false,
-                                    )
-                            }.onFailure { lastError = it }
-
-                        if (SubscribeCandidateSelector.rank(candidates).isNotEmpty()) {
-                            applyBestCandidate(
-                                candidates = candidates,
-                                idleState = discoveryIdleState,
-                                firstGroupId = firstGroupId,
-                                lastError = lastError,
-                                fallbackMessage = rssHubNotice,
-                                rssHubResults = rssHubResults,
-                            )
-                            return@launch
-                        }
-
-                        updateSearchStage(SearchStage.CHECKING_DYNAMIC_WEBSITE)
-                        runSuspendCatching { withTimeout(20_000) { websiteHelper.inspectDynamic(feedLink) } }
-                            .onSuccess { website ->
-                                candidates +=
-                                    SubscribeCandidateProbe(
-                                        feed = website,
-                                        feedLink = feedLink,
-                                        sourceType = SourceType.WEBSITE,
-                                        kind = SourceCandidateKind.WEBSITE_DYNAMIC,
-                                        sourceNotice =
-                                            androidStringsHelper.getString(
-                                                R.string.dynamic_website_source_notice
-                                            ),
-                                        browser = false,
-                                        dynamicRendering = true,
-                                    )
-                            }.onFailure { lastError = it }
-
-                        applyBestCandidate(
-                            candidates = candidates,
-                            idleState = discoveryIdleState,
-                            firstGroupId = firstGroupId,
-                            lastError = lastError,
-                            fallbackMessage = rssHubNotice,
-                            rssHubResults = rssHubResults,
-                        )
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        _subscribeState.value =
-                            discoveryIdleState.copy(
-                                errorMessage =
-                                    error.message
-                                        ?: androidStringsHelper.getString(R.string.website_request_failed)
-                            )
-                    }
-                }
-
-            _subscribeState.value =
-                SubscribeState.Fetching(
-                    linkState = discoveryIdleState.linkState,
-                    job = job,
-                    stage =
-                        when {
-                            knownRssHubEndpoint -> SearchStage.CHECKING_RSSHUB
-                            inputHint == SourceInputHint.JSON_LIKELY &&
-                                accountService.getCurrentAccount().type.id == AccountType.Local.id ->
-                                SearchStage.CHECKING_JSON
-
-                            else -> SearchStage.CHECKING_RSS
-                        },
-                )
-            job.start()
-        }
-    }
+    /** 启动固定账户的发现链，具体网络阶段按职责拆分。 */
+    fun searchFeed() = startSourceSearch()
 
     /** 更新统一来源探测的当前阶段。 */
-    private fun updateSearchStage(stage: SearchStage) {
+    internal fun updateSearchStage(stage: SearchStage) {
         _subscribeState.update { state ->
             if (state is SubscribeState.Fetching) state.copy(stage = stage) else state
         }
     }
-
-    /** 使用统一健康检查选出最高分候选，并转换成订阅配置状态。 */
-    private fun applyBestCandidate(
-        candidates: List<SubscribeCandidateProbe>,
-        idleState: SubscribeState.Idle,
-        firstGroupId: String,
-        lastError: Throwable?,
-        fallbackMessage: String? = null,
-        rssHubResults: List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult> = emptyList(),
-    ) {
-        val rankedCandidates = SubscribeCandidateSelector.rank(candidates)
-        val selected = rankedCandidates.firstOrNull()
-
-        if (selected == null) {
-            _subscribeState.value =
-                idleState.copy(
-                    errorMessage =
-                        fallbackMessage
-                            ?: lastError?.message
-                            ?: androidStringsHelper.getString(R.string.website_request_failed),
-                    rssHubResults = rssHubResults,
-                )
-            return
-        }
-
-        _subscribeState.value =
-            SubscribeState.Configure(
-                searchedFeed = selected.feed,
-                feedLink = selected.feedLink,
-                sourcePageUrl = idleState.linkState.text.toString(),
-                groups = groupsFlow.value,
-                selectedGroupId = firstGroupId,
-                sourceType = selected.sourceType,
-                sourceNotice = sourceNoticeFor(selected),
-                fullContent = false,
-                browser = if (selected.sourceType == SourceType.RSS) false else selected.browser,
-                candidates = rankedCandidates,
-                selectedCandidateId = selected.id,
-                selectedCandidateIds = setOf(selected.id),
-                dynamicRendering = selected.dynamicRendering,
-                rssHubResults = rssHubResults,
-                catalogMatches = idleState.catalogMatches,
-                catalogMatchCount = idleState.catalogMatchCount,
-            )
-    }
-
-    /** RSSHub 网络失败仅作为非阻断提示，不影响其他候选参与评分。 */
-    private fun rssHubFailureNotice(results: List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult>): String? =
-        rssHubFailureSummary(results)?.let { notice ->
-            androidStringsHelper.getString(notice.resourceId, *notice.arguments.toTypedArray())
-        }
-
-    /** 显式 RSSHub 输入失败时不再回落网页解析，而是给出 route/instance 语义明确的错误。 */
-    private fun explicitRssHubFailureNotice(
-        results: List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult>
-    ): String =
-        rssHubFailureNotice(results)
-            ?: androidStringsHelper.getString(R.string.rsshub_explicit_unavailable_notice)
-
-    /** 在配置页切换有效来源候选，同时保留分组和订阅偏好。 */
-    fun selectSourceCandidate(candidateId: String) {
-        _subscribeState.update { state ->
-            if (state !is SubscribeState.Configure) return@update state
-            val selected = state.candidates.firstOrNull { it.id == candidateId } ?: return@update state
-
-            state.copy(
-                searchedFeed = selected.feed,
-                feedLink = selected.feedLink,
-                sourceType = selected.sourceType,
-                sourceNotice = sourceNoticeFor(selected),
-                fullContent = if (selected.sourceType == SourceType.RSS) false else state.fullContent,
-                browser = if (selected.sourceType == SourceType.RSS) false else selected.browser,
-                dynamicRendering = selected.dynamicRendering,
-                selectedCandidateId = selected.id,
-                selectedCandidateIds = setOf(selected.id),
-            )
-        }
-    }
-
-    /** RSSHub 路由代表可独立订阅的频道，可多选；其他来源候选仍保持互斥单选。 */
-    fun toggleRssHubCandidate(candidateId: String) {
-        _subscribeState.update { state ->
-            if (state !is SubscribeState.Configure) return@update state
-            val candidate = state.candidates.firstOrNull { it.id == candidateId } ?: return@update state
-            if (candidate.kind != SourceCandidateKind.RSSHUB) return@update state
-
-            val currentRssHubOnly =
-                state.selectedCandidateIds.isNotEmpty() &&
-                    state.candidates
-                        .filter { it.id in state.selectedCandidateIds }
-                        .all { it.kind == SourceCandidateKind.RSSHUB }
-            val baseSelection = if (currentRssHubOnly) state.selectedCandidateIds else emptySet()
-            val nextSelection =
-                when {
-                    candidateId !in baseSelection -> baseSelection + candidateId
-                    baseSelection.size > 1 -> baseSelection - candidateId
-                    else -> baseSelection
-                }
-            val primaryId =
-                when {
-                    candidateId in nextSelection -> candidateId
-                    state.selectedCandidateId in nextSelection -> state.selectedCandidateId
-                    else -> nextSelection.firstOrNull()
-                } ?: return@update state
-            val primary = state.candidates.first { it.id == primaryId }
-
-            state.copy(
-                searchedFeed = primary.feed,
-                feedLink = primary.feedLink,
-                sourceType = primary.sourceType,
-                sourceNotice = sourceNoticeFor(primary),
-                fullContent = false,
-                browser = false,
-                dynamicRendering = primary.dynamicRendering,
-                selectedCandidateId = primary.id,
-                selectedCandidateIds = nextSelection,
-            )
-        }
-    }
-
-    /** WebView 低可信兜底不阻断添加，但必须明确告知解析风险。 */
-    private fun sourceNoticeFor(candidate: SubscribeSourceCandidate): String? =
-        if (candidate.kind == SourceCandidateKind.WEBSITE_DYNAMIC && !candidate.diagnostics.accepted) {
-            androidStringsHelper.getString(R.string.dynamic_website_low_confidence_notice)
-        } else {
-            candidate.sourceNotice
-        }
 
     fun cancelSearch() {
         searchCoordinatorJob?.takeIf(Job::isActive)?.cancel()
@@ -637,122 +183,12 @@ constructor(
         searchFeed()
     }
 
-    fun subscribe() {
-        val state = _subscribeState.value
-        if (state !is SubscribeState.Configure) return
-        if (_subscribeUiState.value.isSubscribing) return
-        _subscribeUiState.update { it.copy(isSubscribing = true) }
+    /** 逐项保存所选来源，失败项保留以便重试。 */
+    fun subscribe() = submitSelectedSources()
 
-        applicationScope.launch {
-            try {
-                val selectedCandidates =
-                    state.candidates.filter { it.id in state.selectedCandidateIds }
-                        .ifEmpty {
-                            state.selectedCandidateId
-                                ?.let { id -> state.candidates.firstOrNull { it.id == id } }
-                                ?.let(::listOf)
-                                .orEmpty()
-                        }
-                if (selectedCandidates.isEmpty()) return@launch
-                if (selectedCandidates.size > 1 && selectedCandidates.any { it.kind != SourceCandidateKind.RSSHUB }) {
-                    return@launch
-                }
-
-                if (selectedCandidates.all { it.kind == SourceCandidateKind.RSSHUB }) {
-                    selectedCandidates.forEach { candidate ->
-                        if (!rssService.get().isFeedExist(candidate.feedLink)) {
-                            rssService.subscribeRssHub(
-                                searchedFeed = candidate.feed,
-                                feedLink = candidate.feedLink,
-                                sourcePageUrl = state.sourcePageUrl,
-                                routePath = candidate.rssHubRoutePath,
-                                preferredInstance = candidate.rssHubPreferredInstanceBaseUrl,
-                                resolvedInstance = candidate.rssHubInstanceBaseUrl,
-                                groupId = state.selectedGroupId,
-                                isNotification = state.notification,
-                                isFullContent = false,
-                                isBrowser = false,
-                            )
-                        }
-                    }
-                    hideDrawer()
-                    return@launch
-                }
-
-                val searchedFeed = state.searchedFeed
-                when (state.sourceType) {
-                    SourceType.RSS -> {
-                        val selectedKind =
-                            state.candidates.firstOrNull { it.id == state.selectedCandidateId }?.kind
-                        if (selectedKind == SourceCandidateKind.RSSHUB) {
-                            val selectedCandidate =
-                                state.candidates.firstOrNull { it.id == state.selectedCandidateId }
-                            rssService.subscribeRssHub(
-                                searchedFeed = searchedFeed,
-                                feedLink = state.feedLink,
-                                sourcePageUrl = state.sourcePageUrl,
-                                routePath = selectedCandidate?.rssHubRoutePath,
-                                preferredInstance = selectedCandidate?.rssHubPreferredInstanceBaseUrl,
-                                resolvedInstance = selectedCandidate?.rssHubInstanceBaseUrl,
-                                groupId = state.selectedGroupId,
-                                isNotification = state.notification,
-                                isFullContent = false,
-                                isBrowser = false,
-                            )
-                        } else {
-                            val selectedCandidate =
-                                state.candidates.firstOrNull { it.id == state.selectedCandidateId }
-                            if (accountService.getCurrentAccount().type.id == AccountType.Local.id) {
-                                rssService.subscribeLocalRss(
-                                    searchedFeed = searchedFeed,
-                                    feedLink = state.feedLink,
-                                    groupId = state.selectedGroupId,
-                                    isNotification = state.notification,
-                                    isFullContent = false,
-                                    isBrowser = false,
-                                    etag = selectedCandidate?.etag,
-                                    lastModified = selectedCandidate?.lastModified,
-                                )
-                            } else {
-                                rssService.get().subscribe(
-                                    searchedFeed = searchedFeed,
-                                    feedLink = state.feedLink,
-                                    groupId = state.selectedGroupId,
-                                    isNotification = state.notification,
-                                    isFullContent = false,
-                                    isBrowser = false,
-                                )
-                            }
-                        }
-                    }
-
-                    SourceType.WEBSITE ->
-                        rssService.subscribeWebsite(
-                            searchedFeed = searchedFeed,
-                            feedLink = state.feedLink,
-                            groupId = state.selectedGroupId,
-                            isNotification = state.notification,
-                            isFullContent = state.fullContent,
-                            isBrowser = state.browser,
-                        ).also { feedId ->
-                            websiteHelper.setDynamicRenderingEnabled(feedId, state.dynamicRendering)
-                        }
-
-                    SourceType.JSON ->
-                        rssService.subscribeJson(
-                            searchedFeed = searchedFeed,
-                            feedLink = state.feedLink,
-                            groupId = state.selectedGroupId,
-                            isNotification = state.notification,
-                            isFullContent = state.fullContent,
-                            isBrowser = state.browser,
-                        )
-                }
-                hideDrawer()
-            } finally {
-                _subscribeUiState.update { it.copy(isSubscribing = false) }
-            }
-        }
+    /** 已显示的操作消息可清除，以便下一次相同错误再次触发反馈。 */
+    fun consumeOperationMessage() {
+        _subscribeUiState.update { it.copy(operationMessage = null) }
     }
 
     fun inputNewGroup(content: String) {
@@ -826,100 +262,18 @@ constructor(
             }
         }
     }
-}
-
-internal fun mergeRssHubProbeResults(
-    local: List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult>,
-    probed: List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult>,
-): List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult> {
-    fun key(result: me.ash.reader.infrastructure.rsshub.RssHubProbeResult): String =
-        buildString {
-            append(result.match.route.id)
-            append('|')
-            result.match.parameters.toSortedMap().forEach { (name, value) ->
-                append(name).append('=').append(value).append('&')
-            }
-        }
-
-    val merged = linkedMapOf<String, me.ash.reader.infrastructure.rsshub.RssHubProbeResult>()
-    local.forEach { result -> merged[key(result)] = result }
-    // 只替换本地占位诊断。同一路由可以有多个真实诊断，例如 HTTP 503 加验证未完成。
-    probed.forEach { result -> merged.remove(key(result)) }
-    return merged.values.toList() + probed
-}
-
-enum class SearchStage {
-    CHECKING_RSS,
-    CHECKING_RSSHUB,
-    CHECKING_JSON,
-    CHECKING_WEBSITE,
-    CHECKING_DYNAMIC_WEBSITE,
-}
-
-data class SubscribeUiState(
-    val newGroupDialogVisible: Boolean = false,
-    val newGroupContent: String = "",
-    val newName: String = "",
-    val renameDialogVisible: Boolean = false,
-    val isSubscribing: Boolean = false,
-)
-
-sealed interface SubscribeState {
-    object Hidden : SubscribeState
-
-    sealed interface Visible
-
-    sealed interface Input : SubscribeState, Visible {
-        val linkState: TextFieldState
+    /** 切换账户后废弃旧候选和分组，不能把 A 的预览提交到 B。 */
+    private fun invalidateAccountDiscovery() {
+        cancelSearch()
+        accountOperationScope.coroutineContext.cancelChildren()
+        _subscribeState.value = SubscribeState.Hidden
+        groupsFlow.value = emptyList()
+        showOperationMessage(androidStringsHelper.getString(R.string.subscription_account_changed))
     }
 
-    data class Idle(
-        override val linkState: TextFieldState = TextFieldState(),
-        val importFromOpmlEnabled: Boolean = false,
-        val errorMessage: String? = null,
-        val rssHubResults: List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult> = emptyList(),
-        val catalogMatches: List<FeedCatalogEntry> = emptyList(),
-        val catalogMatchCount: Int = catalogMatches.size,
-    ) : SubscribeState, Input
-
-    data class Fetching(
-        override val linkState: TextFieldState,
-        val job: Job,
-        val stage: SearchStage,
-    ) :
-        SubscribeState, Input
-
-    data class Configure(
-        val searchedFeed: SyndFeed,
-        val feedLink: String,
-        val sourcePageUrl: String,
-        val groups: List<Group> = emptyList(),
-        val notification: Boolean = false,
-        val fullContent: Boolean = false,
-        val browser: Boolean = false,
-        val selectedGroupId: String,
-        val sourceType: SourceType = SourceType.RSS,
-        val sourceNotice: String? = null,
-        val candidates: List<SubscribeSourceCandidate> = emptyList(),
-        val selectedCandidateId: String? = null,
-        val selectedCandidateIds: Set<String> = selectedCandidateId?.let(::setOf) ?: emptySet(),
-        val dynamicRendering: Boolean = false,
-        val rssHubResults: List<me.ash.reader.infrastructure.rsshub.RssHubProbeResult> = emptyList(),
-        val catalogMatches: List<FeedCatalogEntry> = emptyList(),
-        val catalogMatchCount: Int = catalogMatches.size,
-    ) : SubscribeState, Visible
-}
-
-/**
- * suspend 探测允许单阶段 timeout 作为普通失败继续 fallback，但用户/生命周期主动取消必须立即向上传播。
- */
-internal suspend inline fun <T> runSuspendCatching(crossinline block: suspend () -> T): Result<T> =
-    try {
-        Result.success(block())
-    } catch (error: TimeoutCancellationException) {
-        Result.failure(error)
-    } catch (error: CancellationException) {
-        throw error
-    } catch (error: Throwable) {
-        Result.failure(error)
+    /** ViewModel 销毁后不再观察账户变化，因此结束它拥有的全部来源操作。 */
+    override fun onCleared() {
+        accountOperationScope.cancel()
+        super.onCleared()
     }
+}

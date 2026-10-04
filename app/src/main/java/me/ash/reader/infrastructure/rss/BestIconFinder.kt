@@ -5,6 +5,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
 import java.net.URL
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import me.ash.reader.infrastructure.net.useCancellable
 
 class BestIconFinder(private val client: OkHttpClient) {
 
@@ -28,19 +32,24 @@ class BestIconFinder(private val client: OkHttpClient) {
         val links = try {
             val html = fetchHtml(url)
             findIconLinks(url, html)
+        } catch (error: CancellationException) {
+            throw error
         } catch (e: Exception) {
+            // 图标首页不可用时保留原有的标准图标路径探测，并记录真实失败。
             Log.w("RLog", "fetchIcons: $e")
             // Fallback to default icon paths if HTML fetch fails
             defaultIconUrls(url)
         }
 
-        return links.mapNotNull { fetchIconDetails(it) }
+        return links.mapNotNull {
+            currentCoroutineContext().ensureActive()
+            fetchIconDetails(it)
+        }
     }
 
     private suspend fun fetchHtml(url: String): String {
         val request = Request.Builder().url(url).build()
-        val response = client.newCall(request).execute()
-        return response.body.string()
+        return client.newCall(request).useCancellable { response -> response.body.string() }
     }
 
     private fun findIconLinks(baseUrl: String, html: String): List<String> {
@@ -76,12 +85,12 @@ class BestIconFinder(private val client: OkHttpClient) {
         ).map { URL(baseUrl, it).toString() }
     }
 
-    private fun fetchIconDetails(url: String): Icon? {
+    private suspend fun fetchIconDetails(url: String): Icon? {
         try {
             val request = Request.Builder().url(url).build()
-            val response = client.newCall(request).execute()
+            return client.newCall(request).useCancellable { response ->
             val body = response.body.bytes()
-                .takeIf { it.isNotEmpty() } ?: return null
+                .takeIf { it.isNotEmpty() } ?: return@useCancellable null
 
             val contentType = response.header("Content-Type") ?: ""
             val format = when {
@@ -91,11 +100,16 @@ class BestIconFinder(private val client: OkHttpClient) {
                 contentType.contains("ico") -> "ico"
                 contentType.contains("gif") -> "gif"
                 contentType.contains("jpeg") || contentType.contains("jpg") -> "jpg"
-                else -> return null
+                else -> return@useCancellable null
             }
 
-            return Icon(url, format, body.size)
+            Icon(url, format, body.size)
+            }
+        } catch (error: CancellationException) {
+            throw error
         } catch (e: Exception) {
+            // 装饰性候选图标失败只影响该候选，保留日志且继续其他图标。
+            Log.w("RLog", "fetchIconDetails[$url]: $e")
             return null
         }
     }

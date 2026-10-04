@@ -69,6 +69,32 @@ class AndroidDatabaseMigrationTest {
         }
     }
 
+    /** v12 归档链接必须完整保留，新增身份字段为 null，正常来源与外键关系不改变。 */
+    @Test
+    fun migration12To13_preservesExistingArchiveLinksAndFeedRelations() {
+        helper.createDatabase(V12_DATABASE_NAME, 12).apply {
+            insertGroup(NEW_DEFAULT_GROUP_ID)
+            insertFeed(NEW_DEFAULT_GROUP_ID)
+            execSQL(
+                "INSERT INTO archived_article (feedId, link) VALUES (?, ?)",
+                arrayOf(FEED_ID, ARCHIVED_LINK),
+            )
+            close()
+        }
+        helper.runMigrationsAndValidate(V12_DATABASE_NAME, 13, true, MIGRATION_12_13).apply {
+            query("SELECT feedId, link, articleId FROM archived_article").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(FEED_ID, cursor.getString(0))
+                assertEquals(ARCHIVED_LINK, cursor.getString(1))
+                org.junit.Assert.assertTrue(cursor.isNull(2))
+                assertFalse(cursor.moveToNext())
+            }
+            assertDefaultGroupAndFeedAreLinked()
+            assertNoForeignKeyViolations()
+            close()
+        }
+    }
+
     private fun androidx.sqlite.db.SupportSQLiteDatabase.insertGroup(groupId: String) {
         execSQL(
             "INSERT INTO `group` (`id`, `name`, `accountId`) VALUES (?, ?, ?)",
@@ -113,5 +139,8 @@ class AndroidDatabaseMigrationTest {
         const val FEED_ID = "1\$migration-feed"
         const val V10_DATABASE_NAME = "reader-migration-v10-test"
         const val V11_DATABASE_NAME = "reader-migration-v11-repair-test"
+        /** 本轮新增身份字段的独立升级库与历史链接哨兵。 */
+        const val V12_DATABASE_NAME = "reader-migration-v12-archive-test"
+        const val ARCHIVED_LINK = "https://example.com/archived/1"
     }
 }

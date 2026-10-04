@@ -83,37 +83,42 @@ fun WebsiteRulesPage(
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            viewModel.importRules(input.readBytes()) { result ->
-                result.fold(
-                    onSuccess = {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.website_rules_imported, it),
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    },
-                    onFailure = {
-                        resultDialogTitle = context.getString(R.string.website_rule_error_title)
-                        resultDialogMessage =
-                            context.getString(R.string.website_rules_import_failed, it.message.orEmpty())
-                    },
-                )
-            }
+        // 保留文档选择取消行为，实际打开、读取及保存交给 IO 线程。
+        viewModel.importRules(openInput = { context.contentResolver.openInputStream(uri) }) { result ->
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.website_rules_imported, it),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                },
+                onFailure = {
+                    resultDialogTitle = context.getString(R.string.website_rule_error_title)
+                    resultDialogMessage =
+                        context.getString(R.string.website_rules_import_failed, it.message.orEmpty())
+                },
+            )
         }
     }
 
     val templateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(MimeType.JSON)) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        viewModel.exportTemplate { content ->
-            context.contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+        viewModel.exportTemplate(openOutput = { context.contentResolver.openOutputStream(uri) }) { result ->
+            result.onFailure {
+                resultDialogTitle = context.getString(R.string.website_rule_error_title)
+                resultDialogMessage = it.message ?: it.toString()
+            }
         }
     }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(MimeType.JSON)) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        viewModel.exportRules { content ->
-            context.contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+        viewModel.exportRules(openOutput = { context.contentResolver.openOutputStream(uri) }) { result ->
+            result.onFailure {
+                resultDialogTitle = context.getString(R.string.website_rule_error_title)
+                resultDialogMessage = it.message ?: it.toString()
+            }
         }
     }
 

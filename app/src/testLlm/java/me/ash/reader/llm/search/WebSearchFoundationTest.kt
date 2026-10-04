@@ -784,31 +784,6 @@ class WebSearchFoundationTest {
         assertEquals(null, force.response)
     }
 
-    @Test
-    fun `search response conservatively deduplicates equivalent urls`() {
-        val response =
-            WebSearchResponse(
-                providerId = "exa",
-                providerName = "Exa",
-                backendKind = WebSearchBackendKind.RAW_SEARCH,
-                results =
-                    listOf(
-                        WebSearchResult("First", " HTTPS://EXAMPLE.COM:443/story/?utm_source=app#section "),
-                        WebSearchResult("Duplicate", "https://example.com/story?fbclid=abc"),
-                        WebSearchResult("Http remains distinct", "http://example.com/story"),
-                        WebSearchResult("Www remains distinct", "https://www.example.com/story"),
-                        WebSearchResult("Business query remains distinct", "https://example.com/story?lang=zh"),
-                    ),
-            )
-
-        val normalized = response.deduplicateResultsByUrl()
-
-        assertEquals(4, normalized.results.size)
-        assertEquals(" HTTPS://EXAMPLE.COM:443/story/?utm_source=app#section ", normalized.results.first().url)
-        assertTrue(normalized.results.any { it.url == "http://example.com/story" })
-        assertTrue(normalized.results.any { it.url == "https://www.example.com/story" })
-        assertTrue(normalized.results.any { it.url.endsWith("?lang=zh") })
-    }
 
     @Test
     fun `configured provider selection skips unfinished default provider`() {

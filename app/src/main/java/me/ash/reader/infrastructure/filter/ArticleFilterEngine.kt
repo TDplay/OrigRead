@@ -22,10 +22,13 @@ class ArticleFilterEngine @Inject constructor(
     val rulesFlow: StateFlow<List<ArticleFilterRule>> = repository.rulesFlow
 
     /** 返回首条命中规则。 */
-    fun match(article: Article): ArticleFilterMatch? =
+    fun match(article: Article): ArticleFilterMatch? = match(title = article.title, feedId = article.feedId)
+
+    /** 元数据查询与完整文章共用编译规则和来源优先顺序，无需为匹配构造完整文章。 */
+    fun match(title: String, feedId: String): ArticleFilterMatch? =
         ArticleFilterMatcher.matchCompiled(
-            title = article.title,
-            feedId = article.feedId,
+            title = title,
+            feedId = feedId,
             rules = repository.getCompiledRules(),
         )
 

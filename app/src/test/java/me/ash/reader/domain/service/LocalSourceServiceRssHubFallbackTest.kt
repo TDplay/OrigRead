@@ -29,33 +29,14 @@ import org.junit.Test
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
 
-class LocalSourceServiceRssHubFallbackTest {
-    private val feedDao = mock<FeedDao>()
-    private val articleDao = mock<ArticleDao>()
-    private val rssHelper = mock<RssHelper>()
-    private val rssHttpCacheDao = mock<RssHttpCacheDao>()
-    private val websiteHelper = mock<WebsiteHelper>()
-    private val jsonSourceHelper = mock<JsonSourceHelper>()
-    private val rssHubResolver = mock<RssHubResolver>()
-    private val subscriptionRepository = mock<RssHubSubscriptionRepository>()
-    private val service =
-        LocalSourceService(
-            feedDao = feedDao,
-            articleDao = articleDao,
-            rssHelper = rssHelper,
-            rssHttpCacheDao = rssHttpCacheDao,
-            websiteHelper = websiteHelper,
-            jsonSourceHelper = jsonSourceHelper,
-            rssHubResolver = rssHubResolver,
-            rssHubSubscriptionRepository = subscriptionRepository,
-        )
-
+class LocalSourceServiceRssHubFallbackTest : LocalSourceServiceTestFixture() {
     @Test
     fun `RSS 304 在同步入口直接短路且不触发恢复和缓存写入`() {
         runBlocking {
@@ -73,7 +54,7 @@ class LocalSourceServiceRssHubFallbackTest {
             whenever(
                 rssHelper.queryRssXmlConditional(
                     feed = eq(feed),
-                    latestLink = eq(""),
+                    latestLink = isNull(),
                     preDate = eq(preDate),
                     etag = eq(cache.etag),
                     lastModified = eq(cache.lastModified),
@@ -111,7 +92,7 @@ class LocalSourceServiceRssHubFallbackTest {
             }
             val syndFeed = SyndFeedImpl().apply { entries = listOf(entry) }
             val article = mock<Article>()
-            whenever(rssHelper.queryRssHubXmlConditional(eq(feed), eq(""), eq(preDate), anyOrNull(), anyOrNull()))
+            whenever(rssHelper.queryRssHubXmlConditional(eq(feed), isNull(), eq(preDate), anyOrNull(), anyOrNull()))
                 .thenReturn(RssQueryResult(emptyList(), successful = false, failure = java.io.IOException("offline")))
             whenever(subscriptionRepository.descriptor(feed.id))
                 .thenReturn(RssHubSubscriptionDescriptor(originalInput = sourceUrl))
@@ -152,7 +133,8 @@ class LocalSourceServiceRssHubFallbackTest {
         runBlocking {
             val feed = feed(url = "https://example.com/feed.xml")
             val articles = listOf(mock<Article>())
-            whenever(rssHelper.queryRssXml(eq(feed), eq(""), any())).thenReturn(articles)
+            whenever(rssHelper.queryRssXmlConditional(eq(feed), isNull(), any(), anyOrNull(), anyOrNull()))
+                .thenReturn(RssQueryResult(articles))
 
             val result = service.fetch(feed)
 
@@ -164,109 +146,12 @@ class LocalSourceServiceRssHubFallbackTest {
     }
 
     @Test
-    fun `旧版空 Website 刷新失败后可原地恢复为 RSS`() {
-        runBlocking {
-            val preDate = Date(1_786_000_000_000L)
-            val websiteFeed =
-                feed(url = "https://example.com/forum.php?mod=rss").copy(
-                    name = "旧版误分类来源",
-                    sourceType = SourceType.WEBSITE,
-                    isFullContent = true,
-                    isBrowser = true,
-                )
-            val entry =
-                SyndEntryImpl().apply {
-                    title = "中文测试主题"
-                    link = "https://example.com/thread-1.html"
-                }
-            val discovered =
-                SyndFeedImpl().apply {
-                    title = "吾爱破解 - 52pojie.cn"
-                    entries = listOf(entry)
-                }
-            val article = mock<Article>()
-
-            whenever(websiteHelper.fetchArticles(websiteFeed, preDate))
-                .thenThrow(IllegalStateException("当前网站的解析规则均未通过健康检查"))
-            whenever(articleDao.countByFeedId(websiteFeed.accountId, websiteFeed.id)).thenReturn(0)
-            whenever(rssHelper.parseFeedDirect(websiteFeed.url, "")).thenReturn(discovered)
-
-            val recoveredFeed =
-                websiteFeed.copy(
-                    name = "吾爱破解 - 52pojie.cn",
-                    sourceType = SourceType.RSS,
-                    isFullContent = false,
-                    isBrowser = false,
-                )
-            whenever(
-                rssHelper.buildArticlesFromSyndEntries(
-                    eq(recoveredFeed),
-                    eq(websiteFeed.accountId),
-                    eq(listOf(entry)),
-                    eq(preDate),
-                )
-            ).thenReturn(listOf(article))
-
-            val result = service.fetchForSync(websiteFeed, preDate).feedWithArticle
-
-            assertEquals(SourceType.RSS, result.feed.sourceType)
-            assertEquals("吾爱破解 - 52pojie.cn", result.feed.name)
-            assertFalse(result.feed.isFullContent)
-            assertFalse(result.feed.isBrowser)
-            assertSame(article, result.articles.single())
-            verify(feedDao).update(recoveredFeed)
-        }
-    }
-
-    @Test
-    fun `真实 RSS 即使本轮没有新文章也会完成 Website 类型恢复`() {
-        runBlocking {
-            val preDate = Date(1_786_000_000_000L)
-            val websiteFeed = feed("https://example.com/feed.xml").copy(sourceType = SourceType.WEBSITE)
-            val entry = SyndEntryImpl().apply { title = "旧文章"; link = "https://example.com/old" }
-            val discovered = SyndFeedImpl().apply { title = "真实 RSS"; entries = listOf(entry) }
-
-            whenever(websiteHelper.fetchArticles(websiteFeed, preDate))
-                .thenThrow(IllegalStateException("当前网站的解析规则均未通过健康检查"))
-            whenever(articleDao.countByFeedId(websiteFeed.accountId, websiteFeed.id)).thenReturn(0)
-            whenever(rssHelper.parseFeedDirect(websiteFeed.url, "")).thenReturn(discovered)
-            whenever(rssHelper.buildArticlesFromSyndEntries(any(), eq(websiteFeed.accountId), eq(listOf(entry)), eq(preDate)))
-                .thenReturn(emptyList())
-
-            val result = service.fetchForSync(websiteFeed, preDate).feedWithArticle
-
-            assertEquals(SourceType.RSS, result.feed.sourceType)
-            assertEquals("真实 RSS", result.feed.name)
-            assertEquals(emptyList<Article>(), result.articles)
-            verify(feedDao).update(result.feed)
-        }
-    }
-
-    @Test
-    fun `已有文章的 Website 刷新失败时不会自动改成 RSS`() {
-        runBlocking {
-            val preDate = Date(1_786_000_000_000L)
-            val websiteFeed = feed("https://example.com/news").copy(sourceType = SourceType.WEBSITE)
-            val websiteError = IllegalStateException("当前网站的解析规则均未通过健康检查")
-
-            whenever(websiteHelper.fetchArticles(websiteFeed, preDate)).thenThrow(websiteError)
-            whenever(articleDao.countByFeedId(websiteFeed.accountId, websiteFeed.id)).thenReturn(1)
-
-            val thrown = runCatching { service.fetchForSync(websiteFeed, preDate) }.exceptionOrNull()
-
-            assertSame(websiteError, thrown)
-            verify(rssHelper, never()).parseFeedDirect(any(), any(), any())
-            verify(feedDao, never()).update(any())
-        }
-    }
-
-    @Test
     fun `RSSHub refresh failure preserves cache and is reported separately from an empty successful feed`(): Unit = runBlocking {
         val feed = feed("https://hub.example.com/zhihu/hot").copy(icon = null)
         val failure = java.io.EOFException("connection closed")
         whenever(subscriptionRepository.descriptor(feed.id))
             .thenReturn(RssHubSubscriptionDescriptor("rsshub://zhihu/hot", "/zhihu/hot"))
-        whenever(rssHelper.queryRssHubXmlConditional(eq(feed), eq(""), any(), anyOrNull(), anyOrNull()))
+        whenever(rssHelper.queryRssHubXmlConditional(eq(feed), isNull(), any(), anyOrNull(), anyOrNull()))
             .thenReturn(RssQueryResult(emptyList(), successful = false, failure = failure))
         whenever(rssHubResolver.probeRouteForRecovery("/zhihu/hot", null)).thenReturn(emptyList())
 
@@ -293,7 +178,7 @@ class LocalSourceServiceRssHubFallbackTest {
                 lastResolvedUrl = feed.url,
             )
         whenever(subscriptionRepository.descriptor(feed.id)).thenReturn(descriptor)
-        whenever(rssHelper.queryRssHubXmlConditional(eq(feed), eq(""), any(), anyOrNull(), anyOrNull()))
+        whenever(rssHelper.queryRssHubXmlConditional(eq(feed), isNull(), any(), anyOrNull(), anyOrNull()))
             .thenReturn(RssQueryResult(emptyList(), successful = false, failure = java.io.IOException("offline")))
         whenever(rssHubResolver.probeRouteForRecovery("/tiddlywiki/releases", "https://old.example.com"))
             .thenReturn(emptyList())
@@ -309,7 +194,7 @@ class LocalSourceServiceRssHubFallbackTest {
         val feed = feed("https://hub.example.com/zhihu/hot")
         whenever(subscriptionRepository.descriptor(feed.id))
             .thenReturn(RssHubSubscriptionDescriptor("rsshub://zhihu/hot", "/zhihu/hot"))
-        whenever(rssHelper.queryRssHubXmlConditional(eq(feed), eq(""), any(), anyOrNull(), anyOrNull()))
+        whenever(rssHelper.queryRssHubXmlConditional(eq(feed), isNull(), any(), anyOrNull(), anyOrNull()))
             .thenReturn(RssQueryResult(emptyList(), etag = "etag"))
 
         val result = service.fetchForSync(feed)
@@ -317,17 +202,6 @@ class LocalSourceServiceRssHubFallbackTest {
         assertEquals(null, result.failure)
         verifyNoInteractions(rssHubResolver)
     }
-
-    private fun feed(url: String) =
-        Feed(
-            id = "1\$feed-id",
-            name = "RSSHub source",
-            url = url,
-            groupId = "1\$group-id",
-            accountId = 1,
-            icon = "https://example.com/icon.png",
-            sourceType = SourceType.RSS,
-        )
 
     @Test
     fun `route recovery fills an empty name but preserves the user name`(): Unit = runBlocking {
@@ -337,7 +211,7 @@ class LocalSourceServiceRssHubFallbackTest {
             val syndFeed = SyndFeedImpl().apply { title = "Recovered title"; entries = emptyList() }
             whenever(subscriptionRepository.descriptor(feed.id))
                 .thenReturn(RssHubSubscriptionDescriptor("rsshub://zhihu/hot", "/zhihu/hot"))
-            whenever(rssHelper.queryRssHubXmlConditional(eq(feed), eq(""), any(), anyOrNull(), anyOrNull()))
+            whenever(rssHelper.queryRssHubXmlConditional(eq(feed), isNull(), any(), anyOrNull(), anyOrNull()))
                 .thenReturn(RssQueryResult(emptyList(), successful = false, failure = java.io.IOException("offline")))
             whenever(rssHubResolver.probeRouteForRecovery("/zhihu/hot", null)).thenReturn(listOf(
                 RssHubProbeResult(match = RssHubRouteMatch(route(), feedUrl = recoveredUrl),
@@ -349,14 +223,4 @@ class LocalSourceServiceRssHubFallbackTest {
             verify(feedDao).update(recovered)
         }
     }
-
-    private fun route() =
-        RssHubRouteDefinition(
-            id = "dynamic-user",
-            name = "Dynamic user",
-            host = "example.com",
-            pathPrefix = "/user",
-            target = "/example/user/:id",
-            sourcePathTemplate = "/user/:id",
-        )
 }

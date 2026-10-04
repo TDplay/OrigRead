@@ -21,5 +21,7 @@ data class ArchivedArticle(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
     val feedId: String,
-    val link: String
+    val link: String,
+    /** 清理前的来源范围稳定 ID；旧归档迁移后为 null，继续按原链接识别。 */
+    val articleId: String? = null,
 )

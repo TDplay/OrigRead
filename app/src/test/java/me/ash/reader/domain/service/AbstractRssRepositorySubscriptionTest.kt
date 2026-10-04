@@ -26,7 +26,7 @@ class AbstractRssRepositorySubscriptionTest {
     @Test
     fun `concurrent subscriptions for normalized variants of the same RSS URL insert only one feed`() = runBlocking {
         val url = "https://atp.fm/rss"
-        val equivalentUrl = "HTTPS://ATP.FM:443/rss/"
+        val equivalentUrl = "HTTPS://ATP.FM:443/rss#latest"
         val accountId = 1
         val inserted = AtomicBoolean(false)
         val insertCalls = AtomicInteger(0)
@@ -37,15 +37,7 @@ class AbstractRssRepositorySubscriptionTest {
         val rssHelper = mock<RssHelper>()
         val notificationHelper = mock<NotificationHelper>()
         val accountService = mock<AccountService>()
-        val existing =
-            Feed(
-                id = "1\$existing",
-                name = "Accidental Tech Podcast",
-                url = url,
-                groupId = "1\$group",
-                accountId = accountId,
-                sourceType = SourceType.RSS,
-            )
+        val existing = existingFeed(url, accountId)
 
         whenever(accountService.getCurrentAccountId()).thenReturn(accountId)
         whenever(feedDao.queryByLink(eq(accountId), any())).thenAnswer {
@@ -79,6 +71,12 @@ class AbstractRssRepositorySubscriptionTest {
 
         assertEquals(1, insertCalls.get())
     }
+
+    /** 既存来源身份独立于并发安排，避免主体用例被实体构造细节淹没。 */
+    private fun existingFeed(url: String, accountId: Int) = Feed(
+        id = "1\$existing", name = "Accidental Tech Podcast", url = url,
+        groupId = "1\$group", accountId = accountId, sourceType = SourceType.RSS,
+    )
 
     private class TestRssRepository(
         articleDao: ArticleDao,

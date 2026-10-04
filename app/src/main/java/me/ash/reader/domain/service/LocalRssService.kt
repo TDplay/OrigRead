@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Date
 import java.util.UUID
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -44,25 +45,26 @@ data class WebsiteReparseResult(
     val updatedCount: Int,
 )
 
+@Singleton
 class LocalRssService
 @Inject
 constructor(
     @ApplicationContext private val context: Context,
-    private val articleDao: ArticleDao,
-    private val feedDao: FeedDao,
-    private val rssHelper: RssHelper,
-    private val localSourceService: LocalSourceService,
-    private val websiteHelper: WebsiteHelper,
-    private val articleFilterEngine: ArticleFilterEngine,
-    private val notificationHelper: NotificationHelper,
-    private val groupDao: GroupDao,
-    @IODispatcher private val ioDispatcher: CoroutineDispatcher,
+    internal val articleDao: ArticleDao,
+    internal val feedDao: FeedDao,
+    internal val rssHelper: RssHelper,
+    internal val localSourceService: LocalSourceService,
+    internal val websiteHelper: WebsiteHelper,
+    internal val articleFilterEngine: ArticleFilterEngine,
+    internal val notificationHelper: NotificationHelper,
+    internal val groupDao: GroupDao,
+    @IODispatcher internal val ioDispatcher: CoroutineDispatcher,
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     private val workManager: WorkManager,
-    private val accountService: AccountService,
-    private val syncLogger: SyncLogger,
-    private val rssHubSubscriptionRepository: RssHubSubscriptionRepository,
-    private val localSubscriptionDao: LocalSubscriptionDao,
+    internal val accountService: AccountService,
+    internal val syncLogger: SyncLogger,
+    internal val rssHubSubscriptionRepository: RssHubSubscriptionRepository,
+    internal val localSubscriptionDao: LocalSubscriptionDao,
     private val rssHttpCacheDao: RssHttpCacheDao,
 ) :
     AbstractRssRepository(
@@ -77,6 +79,7 @@ constructor(
         accountService,
     ) {
 
+    /** 公共仓库旧入口立即捕获账户，后续保存只使用固定请求中的账户。 */
     override suspend fun subscribe(
         feedLink: String,
         searchedFeed: SyndFeed,
@@ -84,172 +87,17 @@ constructor(
         isNotification: Boolean,
         isFullContent: Boolean,
         isBrowser: Boolean,
-    ) =
-        subscribeWithHttpValidators(
-            feedLink = feedLink,
-            searchedFeed = searchedFeed,
-            groupId = groupId,
-            isNotification = isNotification,
-            isFullContent = isFullContent,
-            isBrowser = isBrowser,
-            etag = null,
-            lastModified = null,
-        )
-
-    suspend fun subscribeWithHttpValidators(
-        feedLink: String,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-        etag: String?,
-        lastModified: String?,
     ) {
-        withSubscriptionLock { accountId ->
-            if (findExistingFeed(accountId, feedLink) != null) return@withSubscriptionLock
-
-            val feed =
-                Feed(
-                    id = accountId.spacerDollar(UUID.randomUUID().toString()),
-                    name = searchedFeed.title.decodeHTML() ?: searchedFeed.title,
-                    url = feedLink,
-                    groupId = groupId,
-                    accountId = accountId,
-                    icon = searchedFeed.icon?.link,
-                    isBrowser = isBrowser,
-                    isNotification = isNotification,
-                    isFullContent = isFullContent,
-                    sourceType = SourceType.RSS,
-                )
-            val articles =
-                rssHelper.buildArticlesFromSyndEntries(
-                    feed = feed,
-                    accountId = accountId,
-                    entries = searchedFeed.entries,
-                )
-            val filteredArticles = articleFilterEngine.filterBeforeInsert(articles, feed.name)
-            insertFeedAndArticles(feed, filteredArticles)
-            if (!etag.isNullOrBlank() || !lastModified.isNullOrBlank()) {
-                rssHttpCacheDao.upsert(
-                    RssHttpCache(
-                        feedId = feed.id,
-                        feedUrl = feed.url,
-                        etag = etag,
-                        lastModified = lastModified,
-                        updatedAt = System.currentTimeMillis(),
-                    )
-                )
-            }
-        }
+        subscribe(SubscriptionRequest(
+            accountId = accountService.getCurrentAccountId(), groupId = groupId,
+            feedLink = feedLink, searchedFeed = searchedFeed,
+            notification = isNotification, fullContent = isFullContent, browser = isBrowser,
+        ))
     }
 
-    /**
-     * 保存普通网站来源，网站内容会在后续同步阶段交给独立解析器处理。
-     */
-    suspend fun subscribeWebsite(
-        feedLink: String,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-    ): String {
-        return withSubscriptionLock { accountId ->
-            findExistingFeed(accountId, feedLink)?.let { return@withSubscriptionLock it.id }
-
-            val feedId = accountId.spacerDollar(UUID.randomUUID().toString())
-            val feed =
-                Feed(
-                    id = feedId,
-                    name = searchedFeed.title,
-                    url = feedLink,
-                    groupId = groupId,
-                    accountId = accountId,
-                    icon = searchedFeed.icon?.url,
-                    isBrowser = isBrowser,
-                    isNotification = isNotification,
-                    isFullContent = isFullContent,
-                    sourceType = SourceType.WEBSITE,
-                )
-            val articles =
-                rssHelper.buildArticlesFromSyndEntries(
-                    feed = feed,
-                    accountId = accountId,
-                    entries = searchedFeed.entries,
-                )
-            val filteredArticles = articleFilterEngine.filterBeforeInsert(articles, feed.name)
-
-            // 网站探测阶段已经成功拿到了这一批文章。首次订阅直接复用，不能先写空 Feed
-            // 再立刻二次请求；二次请求被 418/429/动态验证拦截时会造成“预览有文章、添加后为空”。
-            insertFeedAndArticles(
-                feed = feed,
-                articles = filteredArticles.map { article -> article.copy(feedId = feedId) },
-            )
-            feedId
-        }
-    }
-
-    /** 保存 RSSHub 候选及其原始页面 URL，供后续路由或实例失效时重新探测。 */
-    suspend fun subscribeRssHub(
-        feedLink: String,
-        sourcePageUrl: String,
-        routePath: String? = null,
-        preferredInstance: String? = null,
-        resolvedInstance: String? = null,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-    ): String {
-        return withSubscriptionLock { accountId ->
-            routePath
-                ?.let(rssHubSubscriptionRepository::findFeedIdsByRoute)
-                ?.firstNotNullOfOrNull { existingId ->
-                    feedDao.queryById(existingId)?.takeIf { existing -> existing.accountId == accountId }
-                }
-                ?.let { existing -> return@withSubscriptionLock existing.id }
-            findExistingFeed(accountId, feedLink)?.let { return@withSubscriptionLock it.id }
-
-            val feedId = accountId.spacerDollar(UUID.randomUUID().toString())
-            val feed =
-                Feed(
-                    id = feedId,
-                    name = searchedFeed.title.decodeHTML() ?: searchedFeed.title,
-                    url = feedLink,
-                    groupId = groupId,
-                    accountId = accountId,
-                    icon = searchedFeed.icon?.url,
-                    isBrowser = isBrowser,
-                    isNotification = isNotification,
-                    isFullContent = isFullContent,
-                    sourceType = SourceType.RSS,
-                )
-            val articles =
-                rssHelper.buildArticlesFromSyndEntries(
-                    feed = feed,
-                    accountId = accountId,
-                    entries = searchedFeed.entries,
-                )
-            val filteredArticles = articleFilterEngine.filterBeforeInsert(articles, feed.name)
-            insertFeedAndArticles(
-                feed = feed,
-                articles = filteredArticles.map { article -> article.copy(feedId = feedId) },
-            )
-            rssHubSubscriptionRepository.record(
-                feedId,
-                RssHubSubscriptionDescriptor(
-                    originalInput = sourcePageUrl,
-                    routePath = routePath,
-                    preferredInstance = preferredInstance,
-                    lastResolvedInstance = resolvedInstance,
-                    lastResolvedUrl = feedLink,
-                ),
-            )
-            feedId
-        }
-    }
+    /** 固定账户的本地来源提交入口，配置与文章保存交给按职责拆分的实现。 */
+    override suspend fun subscribe(request: SubscriptionRequest): SubscriptionResult =
+        saveSourceSubscription(request)
 
     override suspend fun deleteFeed(feed: Feed, onlyDeleteNoStarred: Boolean?) {
         super.deleteFeed(feed, onlyDeleteNoStarred)
@@ -258,157 +106,9 @@ constructor(
         }
     }
 
-    /** 保存 JSON/API 来源，接口地址作为后续同步地址。 */
-    suspend fun subscribeJson(
-        feedLink: String,
-        searchedFeed: SyndFeed,
-        groupId: String,
-        isNotification: Boolean,
-        isFullContent: Boolean,
-        isBrowser: Boolean,
-    ) {
-        withSubscriptionLock { accountId ->
-            if (findExistingFeed(accountId, feedLink) != null) return@withSubscriptionLock
-
-            val feedId = accountId.spacerDollar(UUID.randomUUID().toString())
-            val feed =
-                Feed(
-                    id = feedId,
-                    name = searchedFeed.title,
-                    url = feedLink,
-                    groupId = groupId,
-                    accountId = accountId,
-                    icon = searchedFeed.icon?.url,
-                    isBrowser = isBrowser,
-                    isNotification = isNotification,
-                    isFullContent = isFullContent,
-                    sourceType = SourceType.JSON,
-                )
-            val articles =
-                rssHelper.buildArticlesFromSyndEntries(
-                    feed = feed,
-                    accountId = accountId,
-                    entries = searchedFeed.entries,
-                )
-            val filteredArticles = articleFilterEngine.filterBeforeInsert(articles, feed.name)
-
-            // JSON 探测阶段已经成功请求并解析过一次；首次订阅直接复用这批数据。
-            // 不再先保存空 Feed 再立即发第二次网络请求，避免“预览有文章、订阅后空来源”。
-            insertFeedAndArticles(
-                feed = feed,
-                articles = filteredArticles.map { article -> article.copy(feedId = feedId) },
-            )
-        }
-    }
-
-    private suspend fun insertFeedAndArticles(
-        feed: Feed,
-        articles: List<me.ash.reader.domain.model.article.Article>,
-    ) {
-        localSubscriptionDao.insertFeedWithArticles(feed, articles)
-    }
-
-    override suspend fun sync(
-        accountId: Int,
-        feedId: String?,
-        groupId: String?
-    ): ListenableWorker.Result = supervisorScope {
-        return@supervisorScope runCatching {
-            val preTime = System.currentTimeMillis()
-            val preDate = Date(preTime)
-            val currentAccount = accountService.getAccountById(accountId)!!
-            require(currentAccount.type.id == AccountType.Local.id) {
-                "Account type is invalid"
-            }
-            val semaphore = Semaphore(16)
-
-            val feedsToSync =
-                when {
-                    feedId != null -> listOfNotNull(feedDao.queryById(feedId))
-                    groupId != null -> feedDao.queryByGroupId(accountId, groupId)
-                    else -> feedDao.queryAll(accountId)
-                }
-
-            feedsToSync
-                .mapIndexed { _, currentFeed ->
-                    async(Dispatchers.IO) {
-                        semaphore.withPermit {
-                            val syncFetch = localSourceService.fetchForSync(currentFeed, preDate)
-                            if (syncFetch.failure != null) {
-                                syncLogger.log(java.io.IOException(
-                                    "RSSHub [${currentFeed.name}]: ${syncFetch.failure.message}",
-                                    syncFetch.failure,
-                                ))
-                                return@withPermit
-                            }
-                            if (syncFetch.notModified) return@withPermit
-                            val fetchedFeed = syncFetch.feedWithArticle
-                            // 来源抓取阶段可能完成 RSSHub URL 恢复，或把旧版误存的空 Website
-                            // 原地恢复成 RSS。后续清理/入库/通知必须使用本轮实际生效的 Feed，
-                            // 不能继续依赖刷新前的 currentFeed 快照。
-                            val effectiveFeed = fetchedFeed.feed
-
-                            val archivedArticles =
-                                feedDao
-                                    .queryArchivedArticles(effectiveFeed.id)
-                                    .map { it.link }
-                                    .toSet()
-                            if (effectiveFeed.sourceType == SourceType.WEBSITE) {
-                                val existingArticles =
-                                    articleDao.queryAllByFeedId(accountId, effectiveFeed.id)
-                                val obsoleteArticleIds =
-                                    websiteHelper.findObsoleteArticleIds(
-                                        feed = effectiveFeed,
-                                        existingArticles = existingArticles,
-                                        fetchedArticles = fetchedFeed.articles,
-                                    )
-                                if (obsoleteArticleIds.isNotEmpty()) {
-                                    articleDao.deleteByIds(obsoleteArticleIds)
-                                }
-                            }
-                            val fetchedArticles =
-                                articleFilterEngine.filterBeforeInsert(
-                                    articles =
-                                        fetchedFeed.articles.filterNot {
-                                            archivedArticles.contains(it.link)
-                                        },
-                                    sourceName = effectiveFeed.name,
-                                )
-
-                            val newArticles =
-                                if (effectiveFeed.sourceType == SourceType.JSON) {
-                                    updateJsonArticlesAndInsertNew(
-                                        feed = effectiveFeed,
-                                        fetchedArticles = fetchedArticles,
-                                    )
-                                } else if (effectiveFeed.sourceType == SourceType.WEBSITE) {
-                                    updateWebsiteArticlesAndInsertNew(
-                                        feed = effectiveFeed,
-                                        fetchedArticles = fetchedArticles,
-                                    )
-                                } else {
-                                    articleDao.insertListIfNotExist(
-                                        articles = fetchedArticles,
-                                        feed = effectiveFeed,
-                                    )
-                                }
-                            if (effectiveFeed.isNotification && newArticles.isNotEmpty()) {
-                                notificationHelper.notify(
-                                    fetchedFeed.copy(articles = newArticles, feed = effectiveFeed)
-                                )
-                            }
-                        }
-                    }
-                }
-                .awaitAll()
-
-            Timber.tag("RlOG").i("onCompletion: ${System.currentTimeMillis() - preTime}")
-            accountService.update(currentAccount.copy(updateAt = Date()))
-            ListenableWorker.Result.success()
-        }
-            .onFailure { syncLogger.log(it) }
-            .getOrNull() ?: ListenableWorker.Result.retry()
-    }
+    /** 所有来源独立提交后汇总真实结果，部分失败不推进账户完成时间。 */
+    override suspend fun sync(accountId: Int, feedId: String?, groupId: String?): ListenableWorker.Result =
+        syncLocalSources(accountId, feedId, groupId)
 
     /** 重新解析来源中已经存在的文章，不新增文章，也不改变阅读状态。 */
     suspend fun reparseWebsiteArticles(feedId: String): WebsiteReparseResult {
@@ -427,112 +127,4 @@ constructor(
         )
     }
 
-    /**
-     * JSON/API 的服务端内容可能在同一文章 URL 下补充或修正正文。
-     * 刷新时更新远端内容字段，但保留本地阅读状态和首次入库时间，避免：
-     * 1. WordPress 从 excerpt 修正为 content 后旧文章永远无法升级；
-     * 2. 刷新正文把已读/收藏/稍后读重置；
-     * 3. 仅因内容刷新修改 updateAt，干扰 keepArchived 的保留周期。
-     */
-    private suspend fun updateJsonArticlesAndInsertNew(
-        feed: Feed,
-        fetchedArticles: List<me.ash.reader.domain.model.article.Article>,
-    ): List<me.ash.reader.domain.model.article.Article> {
-        if (fetchedArticles.isEmpty()) return emptyList()
-
-        val existingByLink =
-            articleDao.queryArticlesByLinksChunked(
-                linkList = fetchedArticles.map { it.link },
-                feedId = feed.id,
-                accountId = feed.accountId,
-            ).associateBy { it.link }
-
-        val newArticles = mutableListOf<me.ash.reader.domain.model.article.Article>()
-        val updatedArticles = mutableListOf<me.ash.reader.domain.model.article.Article>()
-        fetchedArticles.forEach { fetched ->
-            val existing = existingByLink[fetched.link]
-            if (existing == null) {
-                newArticles += fetched
-            } else {
-                updatedArticles += mergeJsonArticleRefresh(existing, fetched)
-            }
-        }
-
-        if (updatedArticles.isNotEmpty()) {
-            articleDao.update(*updatedArticles.toTypedArray())
-        }
-        if (newArticles.isNotEmpty()) {
-            articleDao.insertList(newArticles)
-        }
-        return newArticles
-    }
-
-    /** 网站来源刷新时更新已有文章的列表元数据，同时保留本地阅读状态和正文缓存。 */
-    private suspend fun updateWebsiteArticlesAndInsertNew(
-        feed: Feed,
-        fetchedArticles: List<me.ash.reader.domain.model.article.Article>,
-    ): List<me.ash.reader.domain.model.article.Article> {
-        if (fetchedArticles.isEmpty()) return emptyList()
-
-        val existingByLink =
-            articleDao.queryArticlesByLinksChunked(
-                linkList = fetchedArticles.map { it.link },
-                feedId = feed.id,
-                accountId = feed.accountId,
-            ).associateBy { it.link }
-
-        val newArticles = mutableListOf<me.ash.reader.domain.model.article.Article>()
-        val updatedArticles = mutableListOf<me.ash.reader.domain.model.article.Article>()
-        fetchedArticles.forEach { fetched ->
-            val existing = existingByLink[fetched.link]
-            if (existing == null) {
-                newArticles += fetched
-            } else {
-                updatedArticles += mergeWebsiteArticleRefresh(existing, fetched)
-            }
-        }
-
-        if (updatedArticles.isNotEmpty()) {
-            articleDao.update(*updatedArticles.toTypedArray())
-        }
-        if (newArticles.isNotEmpty()) {
-            articleDao.insertList(newArticles)
-        }
-        return newArticles
-    }
-
 }
-
-internal fun mergeWebsiteArticleRefresh(
-    existing: me.ash.reader.domain.model.article.Article,
-    fetched: me.ash.reader.domain.model.article.Article,
-): me.ash.reader.domain.model.article.Article =
-    existing.copy(
-        date = fetched.date,
-        title = fetched.title,
-        author = fetched.author,
-        rawDescription = fetched.rawDescription.ifBlank { existing.rawDescription },
-        shortDescription = fetched.shortDescription.ifBlank { existing.shortDescription },
-        img = fetched.img ?: existing.img,
-        link = fetched.link,
-        feedId = existing.feedId,
-        accountId = existing.accountId,
-        // id / isUnread / isStarred / isReadLater / updateAt / fullContent 均保留 existing。
-    )
-
-internal fun mergeJsonArticleRefresh(
-    existing: me.ash.reader.domain.model.article.Article,
-    fetched: me.ash.reader.domain.model.article.Article,
-): me.ash.reader.domain.model.article.Article =
-    existing.copy(
-        date = fetched.date,
-        title = fetched.title,
-        author = fetched.author,
-        rawDescription = fetched.rawDescription,
-        shortDescription = fetched.shortDescription,
-        img = fetched.img ?: existing.img,
-        link = fetched.link,
-        feedId = existing.feedId,
-        accountId = existing.accountId,
-        // id / isUnread / isStarred / isReadLater / updateAt / fullContent 均保留 existing。
-    )

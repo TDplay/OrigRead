@@ -1,7 +1,6 @@
 package me.ash.reader.domain.service
 
 import android.content.Context
-import android.os.Looper
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -33,7 +32,7 @@ import me.ash.reader.ui.ext.DataStoreKey
 import me.ash.reader.ui.ext.dataStore
 import me.ash.reader.ui.ext.getDefaultGroupId
 import me.ash.reader.ui.ext.put
-import me.ash.reader.ui.ext.showToast
+import me.ash.reader.ui.ext.showToastSuspend
 import me.ash.reader.ui.ext.spacerDollar
 
 class AccountService
@@ -182,8 +181,8 @@ constructor(
         }
     }
 
-    fun getDefaultGroup(): Group =
-        getCurrentAccountId().let {
+    fun getDefaultGroup(accountId: Int = getCurrentAccountId()): Group =
+        accountId.let {
             Group(
                 id = it.getDefaultGroupId(),
                 name = context.getString(R.string.defaults),
@@ -197,23 +196,22 @@ constructor(
 
     suspend fun update(account: Account) = accountDao.update(account)
 
-    suspend fun delete(accountId: Int) {
+    /** 删除目标账户并切换到剩余账户；最后账户或不存在的目标返回 false，不能作为删除成功。 */
+    suspend fun delete(accountId: Int): Boolean {
         if (accountDao.queryAll().size == 1) {
-            Looper.myLooper() ?: Looper.prepare()
-            context.showToast(context.getString(R.string.must_have_an_account))
-            Looper.loop()
-            return
+            context.showToastSuspend(context.getString(R.string.must_have_an_account))
+            return false
         }
-        accountDao.queryById(accountId)?.let {
-            articleDao.deleteByAccountId(accountId)
-            feedDao.deleteByAccountId(accountId)
-            groupDao.deleteByAccountId(accountId)
-            accountDao.delete(it)
-            accountDao.queryAll().getOrNull(0)?.let {
-                context.dataStore.put(DataStoreKey.currentAccountId, it.id!!)
-                context.dataStore.put(DataStoreKey.currentAccountType, it.type.id)
-            }
+        val account = accountDao.queryById(accountId) ?: return false
+        articleDao.deleteByAccountId(accountId)
+        feedDao.deleteByAccountId(accountId)
+        groupDao.deleteByAccountId(accountId)
+        accountDao.delete(account)
+        accountDao.queryAll().getOrNull(0)?.let {
+            context.dataStore.put(DataStoreKey.currentAccountId, it.id!!)
+            context.dataStore.put(DataStoreKey.currentAccountType, it.type.id)
         }
+        return true
     }
 
     suspend fun switch(account: Account) {

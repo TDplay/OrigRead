@@ -89,12 +89,12 @@ sealed class LanguagesPreference(val value: Int) : Preference() {
         UseDeviceLanguages -> resolveDeviceLocale()
         English -> Locale("en")
         ChineseSimplified -> Locale.forLanguageTag("zh-Hans")
-        German -> Locale("de")
-        French -> Locale("fr")
+        German -> Locale("de", "DE")
+        French -> Locale("fr", "FR")
         Czech -> Locale("cs")
         Italian -> Locale("it")
         Hindi -> Locale("hi")
-        Spanish -> Locale("es")
+        Spanish -> Locale("es", "ES")
         Polish -> Locale("pl")
         Russian -> Locale("ru")
         Basque -> Locale("eu")
@@ -153,27 +153,27 @@ sealed class LanguagesPreference(val value: Int) : Preference() {
             // Esperanto,
             // Estonian,
             // Filipino,
-            // French,
+                French,
             // Galician,
-            // German,
+                German,
             // Hebrew,
             // Hindi,
             // Hungarian,
             // Indonesian,
             // Italian,
-            // Japanese,
+                Japanese,
             // Kannada,
             // NorwegianBokmal,
             // Persian,
             // Polish,
             // Portuguese,
-            // PortugueseBrazil,
+                PortugueseBrazil,
             // Romanian,
             // Russian,
             // Serbian,
             // Slovak,
             // Slovenian,
-            // Spanish,
+                Spanish,
             // Swedish,
             // Tamil,
             // Turkish,
@@ -189,7 +189,12 @@ sealed class LanguagesPreference(val value: Int) : Preference() {
             0 -> UseDeviceLanguages
             1 -> English
             2 -> ChineseSimplified
+            3 -> German
+            4 -> French
+            8 -> Spanish
             13 -> ChineseTraditional
+            23 -> Japanese
+            28 -> PortugueseBrazil
             // 旧版本保存的其他语言统一回退到跟随系统。
             else -> UseDeviceLanguages
         }
@@ -203,6 +208,14 @@ sealed class LanguagesPreference(val value: Int) : Preference() {
          */
         private fun resolveDeviceLocale(): Locale {
             val locale = Resources.getSystem().configuration.locales[0]
+            // 映射到已有完整资源目录；葡语界面采用巴西葡语。
+            when (locale.language.lowercase(Locale.ROOT)) {
+                "es" -> return Locale("es", "ES")
+                "pt" -> return Locale("pt", "BR")
+                "de" -> return Locale("de", "DE")
+                "fr" -> return Locale("fr", "FR")
+                "ja" -> return Locale.JAPANESE
+            }
             if (locale.language != Locale.CHINESE.language) return Locale.ENGLISH
 
             val script = locale.script

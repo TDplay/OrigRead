@@ -29,8 +29,10 @@ constructor(
 
         val deferredList =
             withContext(Dispatchers.IO) {
-                val rssService = rssService.get()
-                val articleList = rssService.queryUnreadFullContentArticles()
+                val accountId = inputData.getInt("accountId", -1)
+                require(accountId != -1) { "文章后处理缺少目标账户" }
+                val service = rssService.forAccount(accountId)
+                val articleList = service.queryUnreadFullContentArticles(accountId)
                 articleList.map {
                     async { semaphore.withPermit { cacheHelper.checkOrFetchFullContent(it) } }
                 }

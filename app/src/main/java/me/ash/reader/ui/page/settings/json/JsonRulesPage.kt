@@ -79,40 +79,39 @@ fun JsonRulesPage(
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            viewModel.importRules(input.readBytes()) { result ->
-                result.fold(
-                    onSuccess = {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.json_rules_imported, it),
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    },
-                    onFailure = {
-                        errorMessage = context.getString(
-                            R.string.json_rules_import_failed,
-                            it.message.orEmpty(),
-                        )
-                    },
-                )
-            }
+        // 文档提供方可能阻塞，交由 ViewModel 在 IO 线程打开和读取。
+        viewModel.importRules(openInput = { context.contentResolver.openInputStream(uri) }) { result ->
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.json_rules_imported, it),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                },
+                onFailure = {
+                    errorMessage = context.getString(
+                        R.string.json_rules_import_failed,
+                        it.message.orEmpty(),
+                    )
+                },
+            )
         }
     }
     val templateLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(MimeType.JSON)
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        viewModel.exportTemplate { content ->
-            context.contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+        viewModel.exportTemplate(openOutput = { context.contentResolver.openOutputStream(uri) }) { result ->
+            result.onFailure { errorMessage = it.message ?: it.toString() }
         }
     }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(MimeType.JSON)
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        viewModel.exportRules { content ->
-            context.contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+        viewModel.exportRules(openOutput = { context.contentResolver.openOutputStream(uri) }) { result ->
+            result.onFailure { errorMessage = it.message ?: it.toString() }
         }
     }
 

@@ -66,8 +66,9 @@ fun ArticleFilterSettingsPage(
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            viewModel.importRules(input.readBytes()).fold(
+        // 主线程只接收导入计数和错误，文档打开及读取在 IO 线程执行。
+        viewModel.importRules(openInput = { context.contentResolver.openInputStream(uri) }) { result ->
+            result.fold(
                 onSuccess = {
                     Toast.makeText(context, context.getString(R.string.filter_rules_imported, it), Toast.LENGTH_LONG).show()
                 },
@@ -77,7 +78,9 @@ fun ArticleFilterSettingsPage(
     }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(MimeType.JSON)) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        context.contentResolver.openOutputStream(uri)?.use { it.write(viewModel.exportRules().toByteArray()) }
+        viewModel.exportRules(openOutput = { context.contentResolver.openOutputStream(uri) }) { result ->
+            result.onFailure { error = it.message ?: it.toString() }
+        }
     }
 
     OrigReadScaffold(

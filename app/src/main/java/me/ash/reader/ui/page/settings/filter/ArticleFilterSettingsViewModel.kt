@@ -3,6 +3,8 @@ package me.ash.reader.ui.page.settings.filter
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.InputStream
+import java.io.OutputStream
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.ash.reader.domain.repository.ArticleDao
 import me.ash.reader.domain.repository.FeedDao
 import me.ash.reader.domain.service.AccountService
@@ -20,6 +23,8 @@ import me.ash.reader.infrastructure.filter.ArticleFilterRule
 import me.ash.reader.infrastructure.filter.ArticleFilterRuleType
 import me.ash.reader.infrastructure.filter.ArticleFilterStats
 import me.ash.reader.infrastructure.filter.FilteredArticleRecord
+import me.ash.reader.ui.page.settings.readRuleDocument
+import me.ash.reader.ui.page.settings.writeRuleDocument
 
 data class ArticleFilterSettingsUiState(
     val rules: List<ArticleFilterRule> = emptyList(),
@@ -64,12 +69,26 @@ class ArticleFilterSettingsViewModel @Inject constructor(
         reload()
     }
 
-    fun importRules(bytes: ByteArray): Result<Int> =
-        runCatching {
-            repository.importRules(String(bytes, Charsets.UTF_8)).also { reload() }
+    /** 完整文件读取和仓库保存放到 IO 线程，规则和统计的页面反馈仍在主线程。 */
+    fun importRules(openInput: () -> InputStream?, callback: (Result<Int>) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(ioDispatcher) {
+                readRuleDocument(openInput, repository::importRules)
+            }
+            result.onSuccess { reload() }
+            callback(result)
         }
+    }
 
-    fun exportRules(): String = repository.exportRules()
+    /** 完整导出在 IO 线程执行，文件失败回到原页面的错误反馈。 */
+    fun exportRules(openOutput: () -> OutputStream?, callback: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(ioDispatcher) {
+                writeRuleDocument(openOutput, repository::exportRules)
+            }
+            callback(result)
+        }
+    }
 
     /**
      * 合并两类结果：仍在数据库里但被当前规则隐藏的文章，以及抓取时直接被丢弃的最近记录。
@@ -84,8 +103,9 @@ class ArticleFilterSettingsViewModel @Inject constructor(
                     val accountId = accountService.getCurrentAccountId()
                     val feeds = feedDao.queryAll(accountId).associateBy { it.id }
                     val hiddenExisting =
-                        articleDao.queryAllByAccountId(accountId).mapNotNull { article ->
-                            val match = articleFilterEngine.match(article) ?: return@mapNotNull null
+                        articleDao.queryFilterMetadataByAccountId(accountId).mapNotNull { article ->
+                            val match = articleFilterEngine.match(title = article.title, feedId = article.feedId)
+                                ?: return@mapNotNull null
                             FilteredArticleRecord(
                                 articleId = article.id,
                                 feedId = article.feedId,

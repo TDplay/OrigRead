@@ -7,7 +7,7 @@ import me.ash.reader.domain.model.feed.Feed
  * 来源 URL 的比较键。仅用于查重/候选去重，不改写真正保存和请求的 URL。
  *
  * 这里刻意只做不会改变来源语义的保守归一化：scheme/host 大小写、默认端口、fragment、
- * 末尾斜杠以及明确的广告追踪参数。业务查询参数保持原样和原顺序，避免误把两个 API
+ * 根路径斜杠以及明确的广告追踪参数。非根路径的末尾斜杠、业务查询参数保持原样，避免误把两个 API
  * endpoint 合并成同一个来源。
  */
 object SourceUrlNormalizer {
@@ -37,7 +37,7 @@ object SourceUrlNormalizer {
             }
         val path =
             uri.rawPath.orEmpty()
-                .let { if (it == "/") "" else it.trimEnd('/') }
+                .let { if (it == "/") "" else it }
         val query = normalizeQuery(uri.rawQuery)
 
         return URI(

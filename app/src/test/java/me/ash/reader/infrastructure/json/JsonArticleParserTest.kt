@@ -1,8 +1,11 @@
 package me.ash.reader.infrastructure.json
 
 import java.util.Date
+import java.time.Instant
+import java.util.TimeZone
 import me.ash.reader.domain.model.feed.Feed
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -132,5 +135,33 @@ class JsonArticleParserTest {
         assertEquals("https://blog.example.com/wp-json/wp/v2/posts?_embed=1&per_page=30", rule.endpoint)
         assertEquals("$[*]", rule.itemsPath)
         assertEquals("$.title.rendered", rule.titlePath)
+    }
+
+    /** 两个独立站点共享上游编号时，本地主键必须属于各自来源。 */
+    @Test
+    fun `same upstream id in different feeds produces distinct stable ids`() {
+        val rule = WordPressJsonRuleFactory.create("https://example.com")
+        val content = """[{"id":123,"link":"https://example.com/posts/123","title":{"rendered":"文章"}}]"""
+        val parser = JsonArticleParser()
+        val first = parser.parse(content, rule, feed, feed.url, Date(0)).single()
+        val second = parser.parse(content, rule, feed.copy(id = "feed-2"), feed.url, Date(0)).single()
+        assertNotEquals(first.id, second.id)
+        assertEquals(first.id, parser.parse(content, rule, feed, feed.url, Date(0)).single().id)
+    }
+
+    /** date_gmt 的含义固定为 UTC，改变手机时区不能改变文章时间。 */
+    @Test
+    fun `wordpress gmt time is independent of the device default timezone`() {
+        val originalZone = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+            val rule = WordPressJsonRuleFactory.create("https://example.com")
+            val content = """[{"id":1,"date_gmt":"2026-10-04T08:00:00","link":"https://example.com/1","title":{"rendered":"文章"}}]"""
+            val article = JsonArticleParser().parse(content, rule, feed, feed.url, Date(0)).single()
+            assertEquals(Instant.parse("2026-10-04T08:00:00Z").toEpochMilli(), article.date.time)
+        } finally {
+            // 用例临时修改 JVM 默认时区，结束时还原，避免干扰其它日期用例。
+            TimeZone.setDefault(originalZone)
+        }
     }
 }

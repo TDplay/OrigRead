@@ -3,6 +3,8 @@ package me.ash.reader.ui.page.settings.website
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.InputStream
+import java.io.OutputStream
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +29,8 @@ import me.ash.reader.infrastructure.di.MainDispatcher
 import me.ash.reader.infrastructure.website.WebsiteHelper
 import me.ash.reader.infrastructure.website.WebsiteRule
 import me.ash.reader.infrastructure.website.WebsiteRuleRepository
+import me.ash.reader.ui.page.settings.readRuleDocument
+import me.ash.reader.ui.page.settings.writeRuleDocument
 
 data class WebsiteRulesUiState(
     val rules: List<WebsiteRule> = emptyList(),
@@ -79,10 +83,11 @@ class WebsiteRulesViewModel @Inject constructor(
         }
     }
 
-    fun reload() {
+    /** 导入时使用 IO 线程读取的列表，仍保留内部规则的既有隐藏规则。 */
+    fun reload(rules: List<WebsiteRule> = repository.listRules()) {
         _uiState.update {
             it.copy(
-                rules = repository.listRules().filterNot { rule ->
+                rules = rules.filterNot { rule ->
                     rule.id == INTERNAL_ITHOME_RULE_ID
                 }
             )
@@ -199,19 +204,34 @@ class WebsiteRulesViewModel @Inject constructor(
         _uiState.update { it.copy(selectedAiModel = model) }
     }
 
-    fun importRules(bytes: ByteArray, callback: (Result<Int>) -> Unit) {
+    /** 打开、读取、解析、保存和重读均在 IO 线程，页面反馈回到主线程。 */
+    fun importRules(openInput: () -> InputStream?, callback: (Result<Int>) -> Unit) {
         viewModelScope.launch(ioDispatcher) {
-            val result = runCatching { repository.importRules(String(bytes, Charsets.UTF_8)) }
+            val result = readRuleDocument(openInput) { content ->
+                repository.importRules(content) to repository.listRules()
+            }
             withContext(mainDispatcher) {
-                reload()
-                callback(result)
+                result.onSuccess { reload(it.second) }
+                callback(result.map { it.first })
             }
         }
     }
 
-    fun exportRules(callback: (String) -> Unit) = callback(repository.exportRules())
+    /** 在 IO 线程完整导出原规则文档，并在主线程反馈写入结果。 */
+    fun exportRules(openOutput: () -> OutputStream?, callback: (Result<Unit>) -> Unit) {
+        viewModelScope.launch(ioDispatcher) {
+            val result = writeRuleDocument(openOutput, repository::exportRules)
+            withContext(mainDispatcher) { callback(result) }
+        }
+    }
 
-    fun exportTemplate(callback: (String) -> Unit) = callback(repository.exportTemplate())
+    /** 模板导出保留原格式，复用与规则导出相同的流关闭和取消语义。 */
+    fun exportTemplate(openOutput: () -> OutputStream?, callback: (Result<Unit>) -> Unit) {
+        viewModelScope.launch(ioDispatcher) {
+            val result = writeRuleDocument(openOutput, repository::exportTemplate)
+            withContext(mainDispatcher) { callback(result) }
+        }
+    }
 
     fun setEnabled(rule: WebsiteRule, enabled: Boolean) {
         repository.setEnabled(rule.id, enabled)

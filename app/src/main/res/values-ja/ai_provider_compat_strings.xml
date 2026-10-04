@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Translated from the current Simplified Chinese resources. -->
+<resources>
+    <string name="ai_context_window_tokens">コンテキスト長（トークン）</string>
+    <string name="ai_context_window_tokens_desc">モデルが対応する最大コンテキスト長を入力します。</string>
+    <string name="ai_strict_stream_termination">応答の終了を厳密に確認</string>
+    <string name="ai_strict_stream_termination_desc">応答が正常に終了したか確認します。正常な応答が失敗と判定される場合のみオフにしてください。</string>
+    <string name="ai_output_token_limit_style">出力トークン上限の項目</string>
+    <string name="ai_output_token_limit_style_desc">サービスが応答の長さを制限するために使う項目を選びます。</string>
+    <string name="ai_output_token_limit_auto">自動</string>
+    <string name="ai_output_token_limit_max_tokens" translatable="false">max_tokens</string>
+    <string name="ai_output_token_limit_max_completion_tokens" translatable="false">
+    max_completion_tokens</string>
+</resources>

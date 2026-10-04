@@ -35,10 +35,15 @@ class LocalSourceService @Inject constructor(
         val feedWithArticle: FeedWithArticle,
         val notModified: Boolean = false,
         val failure: Exception? = null,
+        val pendingCache: RssHttpCache? = null,
     )
 
+    /** JSON 订阅在入库前保留成功解析的规则，避免刷新重新按域名选错规则。 */
+    fun bindJsonSubscription(feedId: String, sourcePageUrl: String, result: me.ash.reader.infrastructure.json.JsonSourceProbeResult) =
+        jsonSourceHelper.bindSubscription(feedId, sourcePageUrl, result)
+
     /**
-     * 抓取单个来源。当前完整支持 RSS，网站来源将在后续接入独立解析器。
+     * 按来源类型抓取一次，网络和解析错误由具体来源明确上报。
      */
     suspend fun fetch(feed: Feed, preDate: Date = Date()): FeedWithArticle =
         when (feed.sourceType) {
@@ -54,49 +59,16 @@ class LocalSourceService @Inject constructor(
             SourceType.JSON -> SyncFetchResult(jsonSourceHelper.fetch(feed, preDate))
         }
 
-    /** 保留成熟的 RSS 抓取及图标补全逻辑。 */
+    /** 单次抓取与同步共用失败语义；站点图标由现有手动补全入口处理。 */
     private suspend fun fetchRss(feed: Feed, preDate: Date): FeedWithArticle {
-        if (isRssHubFeed(feed)) {
-            val result = fetchRssForSync(feed, preDate)
-            result.failure?.let { throw it }
-            return result.feedWithArticle
-        }
-        var effectiveFeed = feed
-        var articles = rssHelper.queryRssXml(feed, "", preDate)
-        if (articles.isEmpty()) {
-            recoverRssHubFeed(feed, preDate)?.let { recovered ->
-                effectiveFeed = recovered.feed
-                articles = recovered.articles
-            }
-        }
-        if (feed.icon == null) {
-            rssHelper.queryRssIconLink(effectiveFeed.url)?.let { iconLink ->
-                rssHelper.saveRssIcon(feedDao, effectiveFeed, iconLink)
-            }
-        }
-        return FeedWithArticle(
-            feed = effectiveFeed.copy(isNotification = feed.isNotification && articles.isNotEmpty()),
-            articles = articles,
-        )
+        val result = fetchRssForSync(feed, preDate)
+        result.failure?.let { throw it }
+        return result.feedWithArticle
     }
 
     private suspend fun fetchRssForSync(feed: Feed, preDate: Date): SyncFetchResult {
-        val rssHub = isRssHubFeed(feed)
         val cache = rssHttpCacheDao.query(feed.id)?.takeIf { it.feedUrl == feed.url }
-        val queried =
-            if (rssHub) rssHelper.queryRssHubXmlConditional(
-                feed = feed,
-                latestLink = "",
-                preDate = preDate,
-                etag = cache?.etag,
-                lastModified = cache?.lastModified,
-            ) else rssHelper.queryRssXmlConditional(
-                feed = feed,
-                latestLink = "",
-                preDate = preDate,
-                etag = cache?.etag,
-                lastModified = cache?.lastModified,
-            )
+        val queried = queryRssForSync(feed, cache, preDate)
         if (queried.notModified) {
             return SyncFetchResult(
                 feedWithArticle = FeedWithArticle(feed = feed, articles = emptyList()),
@@ -115,10 +87,8 @@ class LocalSourceService @Inject constructor(
             }
         }
 
-        // 只有成功完成 HTTP/XML/文章转换后才更新 validator；临时请求/解析失败保留旧缓存。
-        // 若 RSSHub 恢复到了新 URL，则用空 validator 重建缓存归属，下一次 200 再建立条件请求。
-        if (queried.successful || recoveredSuccessfully) {
-            rssHttpCacheDao.upsert(
+        // 抓取只返回待提交缓存；文章入库事务成功后才允许使用这次响应的 validator。
+        val pendingCache = if (queried.successful || recoveredSuccessfully) {
                 RssHttpCache(
                     feedId = feed.id,
                     feedUrl = effectiveFeed.url,
@@ -126,16 +96,10 @@ class LocalSourceService @Inject constructor(
                     lastModified = queried.lastModified.takeIf { queried.successful },
                     updatedAt = System.currentTimeMillis(),
                 )
-            )
-        }
-
-        if (feed.icon == null && !rssHub) {
-            rssHelper.queryRssIconLink(effectiveFeed.url)?.let { iconLink ->
-                rssHelper.saveRssIcon(feedDao, effectiveFeed, iconLink)
-            }
-        }
+        } else null
         return SyncFetchResult(
-            failure = queried.failure.takeIf { rssHub && !queried.successful && !recoveredSuccessfully },
+            failure = queried.failure.takeIf { !queried.successful && !recoveredSuccessfully },
+            pendingCache = pendingCache,
             feedWithArticle =
                 FeedWithArticle(
                     feed = effectiveFeed.copy(
@@ -145,6 +109,16 @@ class LocalSourceService @Inject constructor(
                 )
         )
     }
+
+    /** 只传入已经提交的 validator；无稳定链接也不截断当前响应。 */
+    private suspend fun queryRssForSync(feed: Feed, cache: RssHttpCache?, fetchedAt: Date) =
+        if (isRssHubFeed(feed)) rssHelper.queryRssHubXmlConditional(
+            feed = feed, latestLink = null, preDate = fetchedAt,
+            etag = cache?.etag, lastModified = cache?.lastModified,
+        ) else rssHelper.queryRssXmlConditional(
+            feed = feed, latestLink = null, preDate = fetchedAt,
+            etag = cache?.etag, lastModified = cache?.lastModified,
+        )
 
     private fun isRssHubFeed(feed: Feed): Boolean =
         rssHubSubscriptionRepository.descriptor(feed.id) != null

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="subscription_batch_result">新增 %1$d 项，已订阅跳过 %2$d 项，失败 %3$d 项。</string>
+    <string name="subscription_account_changed">账户已切换，请重新探测后添加订阅。</string>
+    <string name="opml_import_result">导入 %1$d 个来源，跳过 %2$d 个重复来源。嵌套目录使用完整路径作为分组名称。</string>
+    <string name="opml_import_failed">OPML 导入失败：%1$s</string>
+    <string name="opml_export_rss_only_notice">OPML 仅导出 RSS、Atom 和 RSSHub 来源，网站与 JSON 来源会跳过。迁移这些来源及解析规则请使用完整配置备份。</string>
+</resources>

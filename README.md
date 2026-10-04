@@ -19,6 +19,13 @@
   </p>
 </div>
 
+## Interface languages
+
+OrigRead supports **Spanish, Brazilian Portuguese, German, French, and Japanese**, alongside **English, Simplified Chinese, and Traditional Chinese**.
+
+Choose your interface language in Settings, or let the app follow your system language. This is separate from article translation. The README and standalone user guides are available in English and Simplified Chinese.
+
+
 ## A home for the things you want to read
 
 Your favorite blogs, the news you follow, that occasional column worth waiting for—all in one place. OrigRead brings your chosen sources into a timeline you can read at your own pace.

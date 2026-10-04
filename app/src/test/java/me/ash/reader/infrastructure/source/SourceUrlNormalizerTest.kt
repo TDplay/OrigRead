@@ -10,7 +10,7 @@ class SourceUrlNormalizerTest {
     fun `normalizes harmless source url variations for duplicate checks`() {
         val expected = "https://example.com/feed"
 
-        assertEquals(expected, SourceUrlNormalizer.comparisonKey(" HTTPS://EXAMPLE.COM:443/feed/ "))
+        assertEquals(expected, SourceUrlNormalizer.comparisonKey(" HTTPS://EXAMPLE.COM:443/feed "))
         assertEquals(expected, SourceUrlNormalizer.comparisonKey("https://example.com/feed#latest"))
         assertEquals(expected, SourceUrlNormalizer.comparisonKey("https://example.com/feed?utm_source=app&fbclid=abc"))
     }
@@ -40,11 +40,11 @@ class SourceUrlNormalizerTest {
     }
 
     @Test
-    fun `normalizes default ports fragments trailing slash tracking and host case together`() {
+    fun `normalizes default ports fragments tracking and host case together`() {
         val expected = SourceUrlNormalizer.comparisonKey("https://example.com/feed?category=ai")
         val actual =
             SourceUrlNormalizer.comparisonKey(
-                "HTTPS://EXAMPLE.COM:443/feed/?utm_medium=share&category=ai&gclid=tracking#latest"
+                "HTTPS://EXAMPLE.COM:443/feed?utm_medium=share&category=ai&gclid=tracking#latest"
             )
 
         assertEquals(expected, actual)
@@ -63,10 +63,23 @@ class SourceUrlNormalizerTest {
             "1",
             findFeedByComparisonUrl(
                 feeds,
-                " HTTPS://EXAMPLE.COM:443/feed/?utm_source=backup#latest ",
+                " HTTPS://EXAMPLE.COM:443/feed?utm_source=backup#latest ",
             )?.id,
         )
         assertEquals("2", findFeedByComparisonUrl(feeds, "http://example.com/feed")?.id)
         assertEquals("3", findFeedByComparisonUrl(feeds, "https://www.example.com/feed")?.id)
+    }
+
+    /** 非根路径的斜杠没有资源等价保证，根路径的两种形式仍应等价。 */
+    @Test
+    fun `retains non root trailing slash while normalizing the root path`() {
+        assertNotEquals(
+            SourceUrlNormalizer.comparisonKey("https://example.com/feed"),
+            SourceUrlNormalizer.comparisonKey("https://example.com/feed/"),
+        )
+        assertEquals(
+            SourceUrlNormalizer.comparisonKey("https://example.com"),
+            SourceUrlNormalizer.comparisonKey("https://example.com/"),
+        )
     }
 }

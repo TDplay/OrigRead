@@ -7,6 +7,17 @@ import kotlinx.serialization.Serializable
 data class JsonRuleBundle(
     val schemaVersion: Int = 1,
     val rules: List<JsonRule>,
+    /** 每个来源保留成功探测的规则身份、原页面与实际请求地址。 */
+    val subscriptions: Map<String, JsonSourceBinding> = emptyMap(),
+)
+
+/** 导入规则按 ID 跟踪停用/删除；内置规则保存定义以恢复子目录 endpoint。 */
+@Serializable
+data class JsonSourceBinding(
+    val sourcePageUrl: String,
+    val endpointUrl: String,
+    val rule: JsonRule,
+    val importedRule: Boolean,
 )
 
 /** JSON 数据实际所在位置。旧规则未声明时默认继续按独立 API 处理。 */
@@ -40,6 +51,8 @@ data class JsonRule(
     val imagePath: String? = null,
     val idPath: String? = null,
     val dateFormat: String? = null,
+    /** 无偏移日期所属时区；未声明时保留用户规则原有的设备本地时区语义。 */
+    val dateTimeZone: String? = null,
     val maxItems: Int = 50,
 )
 
