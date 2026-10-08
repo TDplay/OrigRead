@@ -131,6 +131,9 @@ data class TranslationDocument(
     val displayMode: TranslationDisplayMode,
     val translatedTitle: String,
     val translatedContent: String,
+    val expiresAt: Long = Long.MAX_VALUE,
+    val persisted: PersistedTranslation? = null,
+    val cacheWriteFailed: Boolean = false,
 ) {
     /** 兼容只关心传统 Provider 的旧调用点。AI 翻译时返回 null。 */
     val provider: TranslationProviderType?

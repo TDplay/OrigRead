@@ -2,171 +2,67 @@ package me.ash.reader.infrastructure.translation
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.File
-import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
-import me.ash.reader.domain.service.AccountService
-import me.ash.reader.infrastructure.ai.AiTaskPromptCustomization
+import me.ash.reader.domain.repository.ArticleDao
 import me.ash.reader.infrastructure.di.IODispatcher
-import org.json.JSONObject
+import timber.log.Timber
 
-/** 译文是可再生成数据，按账户写入缓存目录，不进入文章同步数据库。 */
+/** LIST/FULL 共用本机持久存储；所有者显式传入，不再读取当前 UI 账户。 */
 @Singleton
 class TranslationCache @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val accountService: AccountService,
+    @ApplicationContext context: Context,
+    private val articleDao: ArticleDao,
     @IODispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
-    suspend fun read(
-        articleId: String,
-        title: String,
-        content: String,
-        target: TranslationTarget,
-        targetLanguage: String,
-        mode: TranslationDisplayMode,
-        promptVariant: String = AiTaskPromptCustomization.DEFAULT_CACHE_VARIANT,
-    ): TranslationDocument? =
-        withContext(ioDispatcher) {
-            runCatching {
-                    val file =
-                        cacheFile(
-                            articleId,
-                            title,
-                            content,
-                            target,
-                            targetLanguage,
-                            mode,
-                            promptVariant,
-                        )
-                    if (!file.exists()) return@withContext null
-                    decode(file.readText())
-                }
-                .getOrNull()
-        }
+    private val store = TranslationDiskStore(context.noBackupFilesDir.resolve("translations"), ::existingOwners)
+    private val legacy = LegacyTranslationCache(context.cacheDir.resolve("translations"), articleDao)
+    val invalidations = store.revision
 
-    suspend fun write(
-        title: String,
-        content: String,
-        document: TranslationDocument,
-        promptVariant: String = AiTaskPromptCustomization.DEFAULT_CACHE_VARIANT,
-    ) =
-        withContext(ioDispatcher) {
-            runCatching {
-                val file =
-                    cacheFile(
-                        document.articleId,
-                        title,
-                        content,
-                        document.target,
-                        document.targetLanguage,
-                        document.displayMode,
-                        promptVariant,
-                    )
-                file.parentFile?.mkdirs()
-                file.writeText(encode(document))
-            }
-        }
-
-    private fun cacheFile(
-        articleId: String,
-        title: String,
-        content: String,
-        target: TranslationTarget,
-        targetLanguage: String,
-        mode: TranslationDisplayMode,
-        promptVariant: String,
-    ): File {
-        val keyParts =
-            mutableListOf(
-                CACHE_VERSION,
-                articleId,
-                sha256(title),
-                sha256(content),
-                target.cacheKey(),
-                targetLanguage,
-                mode.name,
-            )
-        // 默认 Prompt 保留既有缓存 Key；只有实际使用 Skill 时才追加变体，避免普通译文缓存整体失效。
-        if (promptVariant != AiTaskPromptCustomization.DEFAULT_CACHE_VARIANT) {
-            keyParts += promptVariant
-        }
-        val rawKey = keyParts.joinToString(":")
-        val fileName = sha256(rawKey) + ".json"
-        return context.cacheDir
-            .resolve("translations")
-            .resolve(accountService.getCurrentAccountId().toString())
-            .resolve(fileName)
+    suspend fun existingOwners(owners: List<TranslationOwner>): Set<TranslationOwner> = withContext(ioDispatcher) {
+        if (owners.isEmpty()) emptySet() else owners.map { it.articleId }.distinct().chunked(400)
+            .flatMap { articleDao.queryTranslationOwners(it) }.toSet().intersect(owners.toSet())
     }
 
-    private fun encode(document: TranslationDocument): String =
-        JSONObject()
-            .put("articleId", document.articleId)
-            .put("target", encodeTarget(document.target))
-            .put("targetLanguage", document.targetLanguage)
-            .put("sourceLanguage", document.sourceLanguage)
-            .put("displayMode", document.displayMode.name)
-            .put("translatedTitle", document.translatedTitle)
-            .put("translatedContent", document.translatedContent)
-            .toString()
-
-    private fun decode(value: String): TranslationDocument {
-        val json = JSONObject(value)
-        return TranslationDocument(
-            articleId = json.getString("articleId"),
-            target = decodeTarget(json.getJSONObject("target")),
-            targetLanguage = json.getString("targetLanguage"),
-            sourceLanguage = json.optString("sourceLanguage").takeIf { it.isNotBlank() },
-            displayMode = TranslationDisplayMode.valueOf(json.getString("displayMode")),
-            translatedTitle = json.getString("translatedTitle"),
-            translatedContent = json.getString("translatedContent"),
-        )
+    suspend fun read(owner: TranslationOwner, kind: TranslationContentKind, hash: String,
+        target: TranslationTarget, language: String, variant: String): PersistedTranslation? = withContext(ioDispatcher) {
+        store.read(owner, kind, hash, target, language, variant)
     }
 
-    private fun sha256(value: String): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray())
-            .joinToString("") { "%02x".format(it) }
+    suspend fun selected(owner: TranslationOwner, kind: TranslationContentKind, hash: String,
+        language: String): SavedTranslationSelection? = withContext(ioDispatcher) {
+        store.selected(owner, kind, hash, language)
+    }
 
-    private fun TranslationTarget.cacheKey(): String =
-        when (this) {
-            is TranslationTarget.Traditional -> "traditional:${provider.name}"
-            is TranslationTarget.Ai -> "ai:$providerId:$model"
+    /** 保存失败不吞取消、不影响已得到的正文；调用方展示独立的未保存提示。 */
+    suspend fun write(entry: PersistedTranslation): Boolean = withContext(ioDispatcher) {
+        try {
+            store.ensureIndexed()
+            store.write(entry)
+        } catch (error: IOException) {
+            Timber.w(error, "Translation could not be saved locally")
+            false
         }
+    }
 
-    private fun encodeTarget(target: TranslationTarget): JSONObject =
-        when (target) {
-            is TranslationTarget.Traditional ->
-                JSONObject()
-                    .put("type", "traditional")
-                    .put("provider", target.provider.name)
-            is TranslationTarget.Ai ->
-                JSONObject()
-                    .put("type", "ai")
-                    .put("providerId", target.providerId)
-                    .put("providerName", target.providerName)
-                    .put("model", target.model)
-        }
+    suspend fun select(entry: PersistedTranslation, show: Boolean): Boolean = withContext(ioDispatcher) {
+        try { store.select(entry, show); true }
+        catch (error: IOException) { Timber.w(error, "Translation display preference could not be saved"); false }
+    }
 
-    private fun decodeTarget(json: JSONObject): TranslationTarget =
-        when (json.getString("type")) {
-            "traditional" ->
-                TranslationTarget.Traditional(
-                    TranslationProviderType.valueOf(json.getString("provider"))
-                )
-            "ai" ->
-                TranslationTarget.Ai(
-                    providerId = json.getString("providerId"),
-                    providerName = json.optString("providerName").ifBlank { "AI" },
-                    model = json.getString("model"),
-                )
-            else -> error("未知翻译目标类型")
-        }
+    suspend fun removeMissingOwners() = withContext(ioDispatcher) { store.removeMissingOwners() }
 
-    companion object {
-        private const val CACHE_VERSION = "2"
+    suspend fun maintain() = withContext(ioDispatcher) {
+        store.sweep()
+        legacy.cleanup()
+    }
+
+    suspend fun readLegacy(owner: TranslationOwner, title: String, content: String, target: TranslationTarget,
+        language: String, mode: TranslationDisplayMode, variant: String): TranslationDocument? = withContext(ioDispatcher) {
+        if (owner !in existingOwners(listOf(owner))) null
+        else legacy.read(owner, title, content, target, language, mode, variant)
     }
 }
-

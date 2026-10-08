@@ -14,6 +14,7 @@ import androidx.paging.compose.itemKey
 import me.ash.reader.domain.data.Diff
 import me.ash.reader.domain.model.article.ArticleFlowItem
 import me.ash.reader.domain.model.article.ArticleWithFeed
+import me.ash.reader.infrastructure.translation.TranslationDisplayMode
 
 @Suppress("FunctionName")
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -23,6 +24,8 @@ fun LazyListScope.ArticleList(
     isShowFeedIcon: Boolean,
     isShowStickyHeader: Boolean,
     articleListTonalElevation: Int,
+    translations: Map<String, ListTranslationResult> = emptyMap(),
+    translationDisplayMode: TranslationDisplayMode = TranslationDisplayMode.TRANSLATED,
     isSwipeEnabled: () -> Boolean = { false },
     isMenuEnabled: Boolean = true,
     onClick: (ArticleWithFeed, Int) -> Unit = { _, _ -> },
@@ -52,6 +55,8 @@ fun LazyListScope.ArticleList(
                                 fadeOutSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
                             ),
                         articleWithFeed = item.articleWithFeed,
+                        translation = translations[article.id],
+                        translationDisplayMode = translationDisplayMode,
                         isUnread = diffMap[article.id]?.isUnread ?: article.isUnread,
                         articleListTonalElevation = articleListTonalElevation,
                         onClick = { onClick(it, index) },
@@ -92,6 +97,8 @@ fun LazyListScope.ArticleList(
                                     fadeOutSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
                                 ),
                             articleWithFeed = item.articleWithFeed,
+                            translation = translations[article.id],
+                            translationDisplayMode = translationDisplayMode,
                             isUnread = diffMap[article.id]?.isUnread ?: article.isUnread,
                             articleListTonalElevation = articleListTonalElevation,
                             onClick = { onClick(it, index) },

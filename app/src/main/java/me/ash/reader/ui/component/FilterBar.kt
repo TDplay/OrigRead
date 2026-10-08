@@ -5,6 +5,7 @@ import android.view.SoundEffectConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,7 @@ fun FilterBar(
     filterBarFilled: Boolean,
     filterBarPadding: Dp,
     filterBarTonalElevation: Dp,
+    trailingAction: (@Composable RowScope.() -> Unit)? = null,
     filterOnClick: (Filter) -> Unit = {},
 ) {
     val view = LocalView.current
@@ -113,6 +115,7 @@ fun FilterBar(
                     )
                 )
             }
+            trailingAction?.invoke(this)
             Spacer(modifier = Modifier.width(filterBarPadding))
         }
     }

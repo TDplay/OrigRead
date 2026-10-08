@@ -24,6 +24,16 @@ interface ArticleDao :
     ArticleMaintenanceQueries,
     ArticleLookupQueries {
 
+    /** 译文有效性/孤儿清理只读取身份，所有账户及订阅仍须实际存在。调用方按 400 条分块。 */
+    @Query("""
+        SELECT a.accountId AS accountId, a.feedId AS feedId, a.id AS articleId
+        FROM article a JOIN feed f ON f.id = a.feedId AND f.accountId = a.accountId
+        JOIN account c ON c.id = a.accountId
+        WHERE a.id IN (:articleIds)
+    """)
+    suspend fun queryTranslationOwners(articleIds: List<String>): List<me.ash.reader.infrastructure.translation.TranslationOwner>
+
+
     /** 来源类型兼容恢复只需要判断是否已有历史文章，避免为此加载整份文章列表。 */
     @Query(
         """

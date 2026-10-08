@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,6 +33,10 @@ import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.general.MarkAsReadConditions
 import me.ash.reader.domain.service.RssService
+import me.ash.reader.domain.service.AccountService
+import me.ash.reader.ui.page.home.flow.ArticleListTranslationController
+import me.ash.reader.ui.page.home.flow.ListTranslationPersistence
+import me.ash.reader.infrastructure.translation.TranslationDisplayMode
 import me.ash.reader.domain.service.SyncWorker
 import me.ash.reader.infrastructure.android.AndroidImageDownloader
 import me.ash.reader.infrastructure.android.TextToSpeechManager
@@ -55,6 +61,7 @@ class ArticleListReaderViewModel
 @Inject
 constructor(
     internal val rssService: RssService,
+    internal val accountService: AccountService,
     @IODispatcher internal val ioDispatcher: CoroutineDispatcher,
     @ApplicationScope internal val applicationScope: CoroutineScope,
     val diffMapHolder: DiffMapHolder,
@@ -89,7 +96,34 @@ constructor(
     internal val _isSyncingFlow = MutableStateFlow(false)
     val isSyncingFlow = _isSyncingFlow.asStateFlow()
 
+    /** 与正文翻译分离的列表展示状态，复用同一服务及渠道配置。 */
+    private val listTranslationPersistence = ListTranslationPersistence(translationService)
+    val translationCacheInvalidations = translationService.cacheInvalidations
+    val listTranslation = ArticleListTranslationController(
+        coroutineScope = viewModelScope,
+        translate = translationService::translateListTexts,
+        readCached = listTranslationPersistence::read,
+        saveCached = listTranslationPersistence::save,
+        selectCached = listTranslationPersistence::select,
+        isScopeCurrent = { key, accountId ->
+            key == articleListUseCase.pagerFlow.value &&
+                articleListUseCase.pagerFlow.value.filterState == filterStateUseCase.filterStateFlow.value &&
+                accountId == accountService.getCurrentAccountId()
+        },
+    )
+
     init {
+        viewModelScope.launch {
+            articleListUseCase.pagerFlow.combine(accountService.currentAccountIdFlow) { pager, account -> pager to account }
+                .collect { (pager, _) -> listTranslation.reset(pager) }
+        }
+        viewModelScope.launch {
+            translationSettingsRepository.settings
+                .map { it.copy(displayMode = TranslationDisplayMode.TRANSLATED) }
+                .distinctUntilChanged()
+                .combine(aiSettingsRepository.settings) { translation, ai -> translation to ai }
+                .drop(1).collect { listTranslation.reset(articleListUseCase.pagerFlow.value) }
+        }
         viewModelScope.launch {
             syncWorkerStatusFlow.debounce(500L).collect { _isSyncingFlow.value = it }
         }
@@ -133,6 +167,8 @@ constructor(
     val translationUiState = _translationUiState.asStateFlow()
     val translationSettings = translationSettingsRepository.settings
     internal var translationJob: Job? = null
+    internal var translationRestoreJob: Job? = null
+    internal var translationExpiryJob: Job? = null
     internal var translationRequestSerial: Long = 0L
 
     internal val _aiSummaryUiState = MutableStateFlow(ReaderAiSummaryUiState())
@@ -153,6 +189,8 @@ constructor(
     internal var readerRequestSerial = 0L
     internal var initializationJob: Job? = null
     internal var fullContentJob: Job? = null
+
+    init { observeStoredReaderTranslation() }
 
     fun initData(articleId: String, listIndex: Int? = null) = performInitData(articleId, listIndex)
 

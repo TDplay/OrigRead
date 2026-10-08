@@ -34,8 +34,89 @@ class TranslationService @Inject constructor(
 ) {
     private val contentProcessor = TranslationContentProcessor()
 
+    val cacheInvalidations = cache.invalidations
+
+    private suspend fun promptFor(target: TranslationTarget, language: String, list: Boolean = false): AiTaskPromptCustomization =
+        if (target is TranslationTarget.Ai) aiTaskPromptCustomizer.customize(
+            task = AiTaskType.TRANSLATION,
+            baseSystemPrompt = buildAiTranslationSystemPrompt(language) + if (list)
+                "\n本次输入是阅读列表中不同文章的标题和短摘要。各片段独立翻译，不将不同文章拼接为正文，不增加解释。" else "",
+        ) else AiTaskPromptCustomization(systemPrompt = "")
+
+    /** 页面恢复只读本地；没有命中时返回 null，绝不调用翻译渠道。 */
+    suspend fun restoreArticle(owner: TranslationOwner, title: String, content: String,
+        language: String, mode: TranslationDisplayMode): Pair<TranslationDocument, Boolean>? = withContext(ioDispatcher) {
+        val saved = cache.selected(owner, TranslationContentKind.FULL, translationSourceHash(title, content), language)
+            ?: return@withContext null
+        if (saved.entry.promptVariant != promptFor(saved.entry.target, language).cacheVariant) return@withContext null
+        val document = renderStored(saved.entry, content, mode) ?: return@withContext null
+        document to saved.showTranslation
+    }
+
+    suspend fun readListTranslation(owner: TranslationOwner, title: String, description: String,
+        target: TranslationTarget?, language: String): SavedTranslationSelection? = withContext(ioDispatcher) {
+        val hash = translationSourceHash(title, description)
+        val selected = if (target == null) cache.selected(owner, TranslationContentKind.LIST, hash, language)
+            else cache.read(owner, TranslationContentKind.LIST, hash, target, language,
+                promptFor(target, language, list = true).cacheVariant)?.let { SavedTranslationSelection(it, true) }
+        selected?.takeIf {
+            it.entry.promptVariant == promptFor(it.entry.target, language, list = true).cacheVariant &&
+                it.entry.texts.size == 2 && (title.isBlank() || it.entry.texts[0].isNotBlank()) &&
+                (description.isBlank() || it.entry.texts[1].isNotBlank())
+        }
+    }
+
+    suspend fun saveListTranslation(owner: TranslationOwner, title: String, description: String,
+        translatedTitle: String, translatedDescription: String, target: TranslationTarget, language: String): PersistedTranslation? {
+        val entry = PersistedTranslation(owner, TranslationContentKind.LIST, translationSourceHash(title, description),
+            target, language, promptFor(target, language, list = true).cacheVariant,
+            listOf(translatedTitle, translatedDescription), System.currentTimeMillis())
+        val saved = cache.write(entry)
+        requireOwner(owner)
+        return entry.takeIf { saved }
+    }
+
+    suspend fun setTranslationVisible(entry: PersistedTranslation, show: Boolean): Boolean = cache.select(entry, show)
+
+    private suspend fun requireOwner(owner: TranslationOwner) {
+        if (owner !in cache.existingOwners(listOf(owner))) throw TranslationException(
+            TranslationErrorCode.UNKNOWN, "文章已删除，译文不再保存")
+    }
+
+    private fun renderStored(entry: PersistedTranslation, content: String, mode: TranslationDisplayMode): TranslationDocument? {
+        val prepared = contentProcessor.prepare(content)
+        if (entry.texts.size != prepared.texts.size + 1 || entry.texts.drop(1).any(String::isBlank)) return null
+        return TranslationDocument(entry.owner.articleId, entry.target, entry.language, entry.sourceLanguage,
+            mode, entry.texts.first(), contentProcessor.render(prepared, entry.texts.drop(1), mode),
+            expiresAt = entry.expiresAt, persisted = entry)
+    }
+
+    /** 列表只翻译已加载的纯文本，不准备 HTML、不读写正文翻译缓存。 */
+    suspend fun translateListTexts(
+        texts: List<String>,
+        target: TranslationTarget,
+        targetLanguage: String,
+    ): List<String> = withContext(ioDispatcher) {
+        if (texts.isEmpty()) return@withContext emptyList()
+        currentCoroutineContext().ensureActive()
+        validateTarget(target, settingsRepository.current())
+        val translated = when (target) {
+            is TranslationTarget.Traditional -> translateTexts(
+                provider(target.provider), texts, targetLanguage,
+                settingsRepository.runtimeConfig(target.provider), reuseDetectedLanguage = false,
+            )
+            is TranslationTarget.Ai -> {
+                val prompt = promptFor(target, targetLanguage, list = true)
+                translateTextsWithAi("", target, texts, targetLanguage, prompt.systemPrompt,
+                    useContinuityContext = false)
+            }
+        }
+        currentCoroutineContext().ensureActive()
+        translated.texts
+    }
+
     suspend fun translateArticle(
-        articleId: String,
+        owner: TranslationOwner,
         title: String,
         content: String,
         target: TranslationTarget? = null,
@@ -49,27 +130,19 @@ class TranslationService @Inject constructor(
                     ?: settings.targetLanguage.trim().ifBlank {
                     TranslationSettings.defaultTargetLanguage()
                 }
-            // 缓存只是可再生成结果；即使本地已有译文，也必须先确认当前服务仍启用且配置有效。
-            validateTarget(actualTarget, settings)
-            val promptCustomization =
-                if (actualTarget is TranslationTarget.Ai) {
-                    aiTaskPromptCustomizer.customize(
-                        task = AiTaskType.TRANSLATION,
-                        baseSystemPrompt = buildAiTranslationSystemPrompt(targetLanguage),
-                    )
-                } else {
-                    AiTaskPromptCustomization(systemPrompt = "")
+            val promptCustomization = promptFor(actualTarget, targetLanguage)
+            // 先核对归属/内容后读缓存；停用渠道不应剥夺用户已生成的本地结果。
+            requireOwner(owner)
+            cache.read(owner, TranslationContentKind.FULL, translationSourceHash(title, content),
+                actualTarget, targetLanguage, promptCustomization.cacheVariant)?.let { saved ->
+                renderStored(saved, content, settings.displayMode)?.let { document ->
+                    cache.select(saved, true)
+                    return@withContext document
                 }
-            cache.read(
-                    articleId,
-                    title,
-                    content,
-                    actualTarget,
-                    targetLanguage,
-                    settings.displayMode,
-                    promptCustomization.cacheVariant,
-                )
-                ?.let { return@withContext it }
+            }
+            cache.readLegacy(owner, title, content, actualTarget, targetLanguage, settings.displayMode,
+                promptCustomization.cacheVariant)?.let { return@withContext it }
+            validateTarget(actualTarget, settings)
 
             val prepared = contentProcessor.prepare(content)
             val hasTitle = title.isNotBlank()
@@ -101,7 +174,7 @@ class TranslationService @Inject constructor(
             val translatedBlocks = translated.texts.drop(if (hasTitle) 1 else 0)
             val document =
                 TranslationDocument(
-                    articleId = articleId,
+                    articleId = owner.articleId,
                     target = actualTarget,
                     targetLanguage = targetLanguage,
                     sourceLanguage = translated.detectedSourceLanguage,
@@ -114,16 +187,22 @@ class TranslationService @Inject constructor(
                             settings.displayMode,
                         ),
                 )
-            cache.write(
-                title,
-                content,
-                document,
-                promptVariant = promptCustomization.cacheVariant,
-            )
-            document
+            currentCoroutineContext().ensureActive()
+            val entry = PersistedTranslation(owner, TranslationContentKind.FULL,
+                translationSourceHash(title, content), actualTarget, targetLanguage,
+                promptCustomization.cacheVariant, listOf(translatedTitle) + translatedBlocks,
+                System.currentTimeMillis(), translated.detectedSourceLanguage)
+            val saved = cache.write(entry)
+            requireOwner(owner)
+            // 生成期间切换显示模式只在本地重排，不能再请求一次翻译。
+            val displayMode = settingsRepository.current().displayMode
+            document.copy(displayMode = displayMode,
+                translatedContent = if (displayMode == document.displayMode) document.translatedContent
+                    else contentProcessor.render(prepared, translatedBlocks, displayMode),
+                expiresAt = entry.expiresAt, persisted = entry.takeIf { saved }, cacheWriteFailed = !saved)
         }
 
-    /** 缓存读取与真实请求共用同一份运行条件校验，避免停用服务后仍显示旧缓存。 */
+    /** 仅新生成校验运行条件；读取已经保存的本地译文不要求渠道仍启用。 */
     private fun validateTarget(
         target: TranslationTarget,
         settings: TranslationSettings,
@@ -183,6 +262,7 @@ class TranslationService @Inject constructor(
         texts: List<String>,
         targetLanguage: String,
         systemPrompt: String,
+        useContinuityContext: Boolean = true,
     ): TranslationBatchResult {
         val aiSettings = aiSettingsRepository.current()
         if (!aiSettings.enabled) {
@@ -228,7 +308,7 @@ class TranslationService @Inject constructor(
                             buildAiTranslationUserPrompt(
                                 articleTitle = articleTitle,
                                 fragments = batch.map { it.text },
-                                previousTranslations = continuityContext.toList(),
+                                previousTranslations = if (useContinuityContext) continuityContext.toList() else emptyList(),
                             ),
                         config =
                             aiSettingsRepository.runtimeConfig(
@@ -322,6 +402,7 @@ class TranslationService @Inject constructor(
         texts: List<String>,
         targetLanguage: String,
         config: TranslationRuntimeConfig,
+        reuseDetectedLanguage: Boolean = true,
     ): TranslationBatchResult {
         val segments = TranslationSegmenter.splitAll(texts, provider.maxSegmentCharacters)
         val translatedSegments = mutableListOf<String>()
@@ -343,7 +424,7 @@ class TranslationService @Inject constructor(
             val result =
                 provider.translate(
                     texts = batch.map { it.text },
-                    sourceLanguage = detectedSourceLanguage,
+                    sourceLanguage = if (reuseDetectedLanguage) detectedSourceLanguage else null,
                     targetLanguage = targetLanguage,
                     config = config,
                 )

@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -45,6 +46,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,14 +70,22 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import me.ash.reader.R
 import me.ash.reader.domain.data.PagerData
 import me.ash.reader.domain.model.article.ArticleFlowItem
 import me.ash.reader.domain.model.article.ArticleWithFeed
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListDateStickyHeader
+import me.ash.reader.infrastructure.preference.LocalFlowArticleListDesc
+import me.ash.reader.infrastructure.preference.FlowArticleListDescPreference
+import me.ash.reader.infrastructure.translation.TranslationTarget
+import me.ash.reader.infrastructure.translation.TranslationSettings
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListFeedIcon
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListTonalElevation
 import me.ash.reader.infrastructure.preference.LocalFlowFilterBarPadding
@@ -145,6 +156,23 @@ fun FlowPage(
     if (flowUiState == null) return
 
     val pagerData: PagerData = flowUiState.pagerData
+
+    val translationState = viewModel.listTranslation.state.collectAsStateValue()
+    val listTranslationState = if (translationState.scopeKey == pagerData) translationState else ListTranslationState()
+    val translationSettings = viewModel.translationSettings.collectAsStateValue()
+    val translationCacheRevision = viewModel.translationCacheInvalidations.collectAsStateValue()
+    val showListDescription = LocalFlowArticleListDesc.current != FlowArticleListDescPreference.NONE
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, pagerData, showListDescription) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.listTranslation.stop()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.listTranslation.stop()
+        }
+    }
 
     val filterUiState = pagerData.filterState
 
@@ -272,6 +300,51 @@ fun FlowPage(
     val readerState = viewModel.readerStateStateFlow.collectAsStateValue()
 
     var pagingItems: LazyPagingItems<ArticleFlowItem>? by remember { mutableStateOf(null) }
+
+    // 动画期间旧列表仍可能组成，单独记录当前 Pager 的快照，不能把旧来源交给新按钮。
+    var translationPagingItems by remember {
+        mutableStateOf<Pair<PagerData, LazyPagingItems<ArticleFlowItem>>?>(null)
+    }
+    fun loadedTranslationInputs(): List<ListTranslationInput> {
+        val snapshot = translationPagingItems?.takeIf { it.first == pagerData }?.second?.itemSnapshotList?.items.orEmpty()
+        val firstId = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.contentType == CONTENT_TYPE_ARTICLE }?.key
+        val start = snapshot.indexOfFirst { it is ArticleFlowItem.Article && it.articleWithFeed.article.id == firstId }.coerceAtLeast(0)
+        return snapshot.asSequence().drop(start).filterIsInstance<ArticleFlowItem.Article>()
+            .take(ArticleListTranslationController.MAX_ITEMS_PER_REQUEST).map {
+                val article = it.articleWithFeed.article
+                ListTranslationInput.of(article.accountId, article.id, article.title,
+                    if (showListDescription) article.shortDescription else "", article.feedId)
+            }.toList()
+    }
+    // 只恢复屏幕附近已加载项的本地结果，不触发分页、网络或预翻译。
+    LaunchedEffect(pagerData, translationSettings.targetLanguage, showListDescription, translationCacheRevision) {
+        snapshotFlow { loadedTranslationInputs() }.collectLatest { inputs ->
+            viewModel.listTranslation.restore(pagerData, inputs,
+                translationSettings.targetLanguage.trim().ifBlank { TranslationSettings.defaultTargetLanguage() },
+                translationCacheRevision)
+        }
+    }
+    LaunchedEffect(listTranslationState.translations) {
+        val expiry = listTranslationState.translations.values.mapNotNull { it.persisted?.expiresAt }.minOrNull()
+        if (expiry != null) {
+            delay((expiry - System.currentTimeMillis()).coerceAtLeast(0L))
+            viewModel.listTranslation.discardExpired()
+        }
+    }
+    val translateList: (TranslationTarget?) -> Unit = { requestedTarget ->
+        if (viewModel.listTranslation.state.value.isLoading && requestedTarget == null) {
+            viewModel.listTranslation.stop()
+        } else {
+            val inputs = loadedTranslationInputs()
+            viewModel.listTranslation.translateOrToggle(
+                scopeKey = pagerData, inputs = inputs,
+                target = requestedTarget ?: viewModel.listTranslation.state.value.target
+                    ?: viewModel.resolveDefaultTranslationTarget(),
+                language = translationSettings.targetLanguage.trim().ifBlank { TranslationSettings.defaultTargetLanguage() },
+                forceShow = requestedTarget != null,
+            )
+        }
+    }
 
     if (isTwoPane) {
         LaunchedEffect(readerState) {
@@ -541,6 +614,9 @@ fun FlowPage(
                     val pager = flowUiState.pagerData.pager
                     val filterState = flowUiState.pagerData.filterState
                     val pagingItems = pager.collectAsLazyPagingItems().also { pagingItems = it }
+                    SideEffect {
+                        if (flowUiState.pagerData == pagerData) translationPagingItems = pagerData to pagingItems
+                    }
 
                     if (markAsReadOnScroll && filterState.filter.isUnread()) {
                         LaunchedEffect(listState.isScrollInProgress) {
@@ -705,8 +781,12 @@ fun FlowPage(
                                 isShowFeedIcon = articleListFeedIcon.value,
                                 isShowStickyHeader = articleListDateStickyHeader.value,
                                 articleListTonalElevation = articleListTonalElevation.value,
+                                translations = if (listTranslationState.showTranslation && flowUiState.pagerData == pagerData)
+                                    listTranslationState.translations else emptyMap(),
+                                translationDisplayMode = translationSettings.displayMode,
                                 isSwipeEnabled = { listState.isScrollInProgress },
                                 onClick = { articleWithFeed, index ->
+                                    viewModel.listTranslation.stop()
                                     if (articleWithFeed.feed.isBrowser) {
                                         viewModel.diffMapHolder.updateDiff(
                                             articleWithFeed,
@@ -742,26 +822,37 @@ fun FlowPage(
             },
             floatingActionButtonPosition = FabPosition.Center,
             bottomBar = {
-                FilterBar(
-                    modifier =
-                        with(sharedTransitionScope) {
-                            Modifier.sharedElement(
-                                sharedContentState = rememberSharedContentState("filterBar"),
-                                animatedVisibilityScope = animatedVisibilityScope,
+                Column {
+                    ListTranslationStatus(listTranslationState)
+                    FilterBar(
+                        modifier =
+                            with(sharedTransitionScope) {
+                                Modifier.sharedElement(
+                                    sharedContentState = rememberSharedContentState("filterBar"),
+                                    animatedVisibilityScope = animatedVisibilityScope,
+                                )
+                            },
+                        filter = filterUiState.filter,
+                        filterBarStyle = filterBarStyle.value,
+                        filterBarFilled = true,
+                        filterBarPadding = filterBarPadding.dp,
+                        filterBarTonalElevation = filterBarTonalElevation.value.dp,
+                        trailingAction = {
+                            ListTranslationButton(
+                                viewModel = viewModel, state = listTranslationState,
+                                hasItems = translationPagingItems?.takeIf { it.first == pagerData }?.second
+                                    ?.itemSnapshotList?.items?.any { it is ArticleFlowItem.Article } == true,
+                                onTranslate = translateList,
                             )
                         },
-                    filter = filterUiState.filter,
-                    filterBarStyle = filterBarStyle.value,
-                    filterBarFilled = true,
-                    filterBarPadding = filterBarPadding.dp,
-                    filterBarTonalElevation = filterBarTonalElevation.value.dp,
-                ) {
-                    if (filterUiState.filter != it) {
-                        viewModel.changeFilter(filterUiState.copy(filter = it))
-                    } else {
-                        scope.launch {
-                            if (listState.firstVisibleItemIndex != 0) {
-                                listState.animateScrollToItem(0)
+                    ) {
+                        if (filterUiState.filter != it) {
+                            viewModel.changeFilter(filterUiState.copy(filter = it))
+                        } else {
+                            scope.launch {
+                                if (listState.firstVisibleItemIndex != 0) {
+                                    listState.animateScrollToItem(0)
+                                }
                             }
                         }
                     }

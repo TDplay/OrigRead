@@ -88,6 +88,7 @@ class AndroidApp : Application(), Configuration.Provider {
     @Inject lateinit var settingsProvider: SettingsProvider
 
     @Inject lateinit var diffMapHolder: DiffMapHolder
+    @Inject lateinit var translationCacheMaintenance: me.ash.reader.infrastructure.translation.TranslationCacheMaintenance
 
     /**
      * When the application startup.
@@ -108,6 +109,7 @@ class AndroidApp : Application(), Configuration.Provider {
             checkUpdate()
         }
         Coil.setImageLoader(imageLoader)
+        translationCacheMaintenance.start()
     }
 
     /** Override the [Configuration.Builder] to provide the [HiltWorkerFactory]. */

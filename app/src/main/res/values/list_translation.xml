@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="list_translation_action">Translate list</string>
+    <string name="list_translation_stop">Stop translation</string>
+    <string name="list_translation_progress">Translating %1$d/%2$d</string>
+    <string name="list_translation_error">%1$d/%2$d translated · %3$s</string>
+</resources>

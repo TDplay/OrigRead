@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.ash.reader.infrastructure.translation.TranslationProviderType
 import me.ash.reader.infrastructure.translation.TranslationTarget
+import me.ash.reader.infrastructure.translation.TranslationOwner
 
 /** 阅读页长按翻译选择器可以把传统服务或某个 AI 模型设为后续单击翻译的默认方式。 */
 internal fun ArticleListReaderViewModel.performSetDefaultTranslationTarget(target: TranslationTarget) {
@@ -14,13 +15,15 @@ internal fun ArticleListReaderViewModel.performSetDefaultTranslationTarget(targe
 
 /** 首次点击开始翻译；翻译中再次点击立即取消；已有译文时只在原文和译文之间切换。 */
 internal fun ArticleListReaderViewModel.performTranslateOrToggle() {
+    translationRestoreJob?.cancel()
     val state = _translationUiState.value
     if (state.isLoading) {
         stopTranslation()
         return
     }
-    if (state.document != null) {
+    if (state.document != null && state.document.expiresAt > System.currentTimeMillis()) {
         _translationUiState.update { it.copy(showTranslation = !it.showTranslation) }
+        rememberTranslationVisibility(state.document, !state.showTranslation)
         return
     }
     translateWithTarget(resolveDefaultTranslationTarget())
@@ -43,6 +46,7 @@ internal fun ArticleListReaderViewModel.performStopTranslation() {
  * 这里只改变当前阅读瞬时状态，不修改默认翻译目标或持久设置。
  */
 internal fun ArticleListReaderViewModel.performShowOriginalContentForCitation() {
+    translationRestoreJob?.cancel()
     if (_translationUiState.value.isLoading) {
         stopTranslation()
     }
@@ -84,26 +88,31 @@ internal fun ArticleListReaderViewModel.performIsTranslationProviderConfigured(t
 /** 翻译请求捕获文章、正文和目标，失败时恢复本次请求前的展示。 */
 private data class ReaderTranslationRequest(
     val articleId: String, val title: String, val content: String,
+    val owner: TranslationOwner,
     val target: TranslationTarget, val language: String, val serial: Long,
     val previous: ReaderTranslationUiState,
 )
 
 /** 统一翻译目标入口，保留相同目标与语言的已有译文。 */
 internal fun ArticleListReaderViewModel.performTranslateWithTarget(target: TranslationTarget) {
+    translationRestoreJob?.cancel()
     val state = _translationUiState.value
     val language = translationSettingsRepository.current().targetLanguage.trim().ifBlank {
         me.ash.reader.infrastructure.translation.TranslationSettings.defaultTargetLanguage()
     }
-    if (state.document?.target == target && state.document.targetLanguage == language) {
+    if (state.document?.target == target && state.document.targetLanguage == language &&
+        state.document.expiresAt > System.currentTimeMillis()) {
         _translationUiState.update { it.copy(showTranslation = true) }
+        rememberTranslationVisibility(state.document, true)
         return
     }
     val articleId = _readerState.value.articleId ?: return
+    val article = currentArticle?.takeIf { it.id == articleId && it.accountId == accountService.getCurrentAccountId() } ?: return
     val content = _readerState.value.content.text.orEmpty()
     if (content.isBlank()) return
     translationJob?.cancel()
     val request = ReaderTranslationRequest(articleId, _readerState.value.title.orEmpty(), content,
-        target, language, ++translationRequestSerial, state)
+        TranslationOwner(article.accountId, article.feedId, articleId), target, language, ++translationRequestSerial, state)
     // 先发布 loading，快速再次点击才能观察并取消正在进行的请求。
     _translationUiState.value = state.copy(isLoading = true, errorMessage = null)
     translationJob = viewModelScope.launch { executeTranslation(request) }
@@ -112,11 +121,13 @@ internal fun ArticleListReaderViewModel.performTranslateWithTarget(target: Trans
 /** 成功与错误都按文章和代次发布，取消不转换成用户错误。 */
 private suspend fun ArticleListReaderViewModel.executeTranslation(request: ReaderTranslationRequest) {
     try {
-        val document = translationService.translateArticle(articleId = request.articleId,
+        val document = translationService.translateArticle(owner = request.owner,
             title = request.title, content = request.content, target = request.target,
             targetLanguageOverride = request.language)
         if (isCurrentTranslation(request) && document.target == request.target && document.targetLanguage == request.language) {
-            _translationUiState.value = ReaderTranslationUiState(document = document, showTranslation = true)
+            _translationUiState.value = ReaderTranslationUiState(document = document, showTranslation = true,
+                errorMessage = if (document.cacheWriteFailed) "译文可阅读，但未能保存到本机" else null)
+            scheduleStoredTranslationExpiry(document)
         }
     } catch (error: CancellationException) {
         // 换文、切换正文模式或主动停止继续传播取消。
@@ -130,7 +141,8 @@ private suspend fun ArticleListReaderViewModel.executeTranslation(request: Reade
 
 /** 目标改变或新请求开始后旧翻译不能重新切换页面。 */
 private fun ArticleListReaderViewModel.isCurrentTranslation(request: ReaderTranslationRequest): Boolean =
-    _readerState.value.articleId == request.articleId && translationRequestSerial == request.serial
+    _readerState.value.articleId == request.articleId && translationRequestSerial == request.serial &&
+        currentArticle?.accountId == request.owner.accountId && accountService.getCurrentAccountId() == request.owner.accountId
 
 /** 长按菜单选择传统 Provider 后立即翻译；保留该方法供旧调用点复用。 */
 internal fun ArticleListReaderViewModel.performTranslateWithProvider(type: TranslationProviderType) {
@@ -145,6 +157,10 @@ internal fun ArticleListReaderViewModel.performClearTranslationError() {
 /** 正文或文章改变时取消翻译并清空旧展示。 */
 internal fun ArticleListReaderViewModel.resetTranslation() {
     translationRequestSerial++
+    translationRestoreJob?.cancel()
+    translationRestoreJob = null
+    translationExpiryJob?.cancel()
+    translationExpiryJob = null
     translationJob?.cancel()
     translationJob = null
     _translationUiState.value = ReaderTranslationUiState()

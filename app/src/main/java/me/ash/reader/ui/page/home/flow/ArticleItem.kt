@@ -58,6 +58,7 @@ import coil.size.Precision
 import coil.size.Scale
 import me.ash.reader.R
 import me.ash.reader.domain.model.article.ArticleWithFeed
+import me.ash.reader.infrastructure.translation.TranslationDisplayMode
 import me.ash.reader.infrastructure.preference.FlowArticleListDescPreference
 import me.ash.reader.infrastructure.preference.FlowArticleReadIndicatorPreference
 import me.ash.reader.infrastructure.preference.LocalArticleListSwipeEndAction
@@ -90,11 +91,20 @@ fun ArticleItem(
     modifier: Modifier = Modifier,
     articleWithFeed: ArticleWithFeed,
     isUnread: Boolean = articleWithFeed.article.isUnread,
+    translation: ListTranslationResult? = null,
+    translationDisplayMode: TranslationDisplayMode = TranslationDisplayMode.TRANSLATED,
     onClick: (ArticleWithFeed) -> Unit = {},
     onLongClick: (() -> Unit)? = null,
 ) {
     val feed = articleWithFeed.feed
     val article = articleWithFeed.article
+
+    // 来源内容或摘要显示设置变化后，旧译文不得套到新文字上；点击/分享始终传原 Article。
+    val includeDescription = LocalFlowArticleListDesc.current != FlowArticleListDescPreference.NONE
+    val visibleTranslation = translation?.takeIf {
+        it.showTranslation && it.isFresh() && it.source == ListTranslationInput.of(article.accountId, article.id, article.title,
+            if (includeDescription) article.shortDescription else "", article.feedId)
+    }
 
     ArticleItem(
         modifier = modifier,
@@ -102,6 +112,9 @@ fun ArticleItem(
         feedIconUrl = feed.icon,
         title = article.title,
         shortDescription = article.shortDescription,
+        translatedTitle = visibleTranslation?.title?.takeIf(String::isNotBlank),
+        translatedDescription = visibleTranslation?.description?.takeIf(String::isNotBlank),
+        bilingual = translationDisplayMode == TranslationDisplayMode.BILINGUAL,
         timeString = article.dateString,
         imgData = article.img,
         isStarred = article.isStarred,
@@ -119,6 +132,9 @@ fun ArticleItem(
     feedIconUrl: String? = null,
     title: String = "",
     shortDescription: String = "",
+    translatedTitle: String? = null,
+    translatedDescription: String? = null,
+    bilingual: Boolean = false,
     timeString: String? = null,
     imgData: Any? = null,
     isStarred: Boolean = false,
@@ -134,9 +150,11 @@ fun ArticleItem(
     val articleListReadIndicator = LocalFlowArticleListReadIndicator.current
     var imageLoadFailed by remember(imgData) { mutableStateOf(false) }
     val titleTypography = MaterialTheme.typography.titleMedium
-    val titleStyle = remember(title, titleTypography) {
+    val displayTitle = if (bilingual) title else translatedTitle ?: title
+    val displayDescription = if (bilingual) shortDescription else translatedDescription ?: shortDescription
+    val titleStyle = remember(displayTitle, titleTypography) {
         titleTypography
-            .applyTextDirection(title.requiresBidi())
+            .applyTextDirection(displayTitle.requiresBidi())
             .merge(lineHeight = 22.sp)
     }
 
@@ -237,7 +255,7 @@ fun ArticleItem(
                 // Title
                 Row {
                     Text(
-                        text = title,
+                        text = displayTitle,
                         color = MaterialTheme.colorScheme.onSurface,
                         style = titleStyle,
                         maxLines =
@@ -254,23 +272,34 @@ fun ArticleItem(
                     }
                 }
 
+                // 对照标题独占行数，不与原文共用一个 Text 的省略范围。
+                if (bilingual && !translatedTitle.isNullOrBlank() && translatedTitle != title) {
+                    Text(
+                        text = translatedTitle, modifier = Modifier.padding(top = 4.dp),
+                        style = titleTypography.applyTextDirection(translatedTitle.requiresBidi()).merge(lineHeight = 22.sp),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = if (articleListDesc != FlowArticleListDescPreference.NONE) 2 else 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
                 // Description
                 if (
                     articleListDesc != FlowArticleListDescPreference.NONE &&
-                        shortDescription.isNotBlank()
+                        displayDescription.isNotBlank()
                 ) {
                     val bodySmallTypography = MaterialTheme.typography.bodySmall
                     val descriptionStyle = remember(
-                        shortDescription,
+                        displayDescription,
                         bodySmallTypography,
                     ) {
                         bodySmallTypography.applyTextDirection(
-                            shortDescription.requiresBidi()
+                            displayDescription.requiresBidi()
                         )
                     }
                     Text(
                         modifier = Modifier.padding(top = 4.dp),
-                        text = shortDescription,
+                        text = displayDescription,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = descriptionStyle,
                         maxLines =
@@ -281,6 +310,15 @@ fun ArticleItem(
                             },
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (bilingual && !translatedDescription.isNullOrBlank() && translatedDescription != shortDescription) {
+                        Text(
+                            text = translatedDescription, modifier = Modifier.padding(top = 4.dp),
+                            style = bodySmallTypography.applyTextDirection(translatedDescription.requiresBidi()),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (articleListDesc == FlowArticleListDescPreference.LONG) 4 else 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
 
@@ -330,6 +368,8 @@ fun SwipeableArticleItem(
     articleWithFeed: ArticleWithFeed,
     isUnread: Boolean = articleWithFeed.article.isUnread,
     articleListTonalElevation: Int = 0,
+    translation: ListTranslationResult? = null,
+    translationDisplayMode: TranslationDisplayMode = TranslationDisplayMode.TRANSLATED,
     onClick: (ArticleWithFeed) -> Unit = {},
     isSwipeEnabled: () -> Boolean = { false },
     isMenuEnabled: Boolean = true,
@@ -380,6 +420,8 @@ fun SwipeableArticleItem(
             ArticleItem(
                 articleWithFeed = articleWithFeed,
                 isUnread = isUnread,
+                translation = translation,
+                translationDisplayMode = translationDisplayMode,
                 onClick = onClick,
                 onLongClick = onLongClick,
             )

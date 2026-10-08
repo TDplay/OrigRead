@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="list_translation_action">翻譯列表</string>
+    <string name="list_translation_stop">停止翻譯</string>
+    <string name="list_translation_progress">正在翻譯 %1$d/%2$d</string>
+    <string name="list_translation_error">已翻譯 %1$d/%2$d · %3$s</string>
+</resources>
