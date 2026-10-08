@@ -1,6 +1,8 @@
 package me.ash.reader.infrastructure.source
 
 import java.net.URI
+import java.util.Locale
+
 import me.ash.reader.infrastructure.rsshub.RssHubInputParser
 
 /**
@@ -19,6 +21,17 @@ fun isRssLikelyUrl(url: String): Boolean = rssHintScore(url) > 0
 /** URL 是否更像 JSON / REST API。仅用于探测排序，不表示已确认来源类型。 */
 fun isJsonLikelyUrl(url: String): Boolean = jsonHintScore(url) > 0
 
+/** 已知 Feed 托管入口，不是任意带 .xml 后缀的网页；失败不能冒充动态网站。 */
+internal fun isFeedburnerFeedUrl(url: String): Boolean = runCatching {
+    val uri = URI(url.trim())
+    val host = uri.host.orEmpty().lowercase(Locale.ROOT)
+    val path = uri.rawPath.orEmpty().trim('/')
+    uri.scheme?.lowercase(Locale.ROOT) in setOf("http", "https") &&
+        host in setOf("feeds.feedburner.com", "feeds2.feedburner.com") &&
+        path.isNotBlank() && !path.startsWith("~")
+}.getOrDefault(false)
+
+
 private fun rssHintScore(url: String): Int =
     runCatching {
         val uri = URI(url)
@@ -27,7 +40,7 @@ private fun rssHintScore(url: String): Int =
         val query = uri.query.orEmpty().lowercase()
 
         var score = 0
-        if (host == "feeds.feedburner.com" || host == "feedproxy.google.com") score += 5
+        if (isFeedburnerFeedUrl(url) || host == "feedproxy.google.com") score += 5
         if (
             path.endsWith(".xml") ||
                 path.endsWith(".rss") ||
@@ -77,14 +90,14 @@ private fun jsonHintScore(url: String): Int =
 
 /**
  * 识别用户输入是否直接位于已知 RSSHub 实例 route 下。
- * 这是唯一允许在网络请求前进入排他分支的情况，因为它有内置/用户配置实例作为额外证据。
+ * 已知 RSSHub route 与 Feed 托管入口有专门的失败策略；普通 URL 后缀仍只是提示。
  */
 fun isKnownRssHubEndpoint(url: String, knownInstances: List<String> = emptyList()): Boolean =
     RssHubInputParser.parseExplicit(url, knownInstances) != null
 
 /**
  * 提取非排他性 Hint。
- * 冲突时只比较启发式权重来决定“先试谁”；无论哪一方先试失败，流水线都会继续另一方。
+ * 普通地址冲突时只调整尝试顺序；已知托管 Feed 的失败策略由发现入口单独处理。
  */
 fun sourceInputHint(url: String): SourceInputHint {
     val rssScore = rssHintScore(url)

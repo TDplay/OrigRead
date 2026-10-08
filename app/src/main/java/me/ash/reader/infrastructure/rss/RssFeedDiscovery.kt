@@ -7,6 +7,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import me.ash.reader.infrastructure.net.HttpTextDecoder
 import me.ash.reader.infrastructure.net.HttpTextKind
+import me.ash.reader.infrastructure.source.isFeedburnerFeedUrl
+
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 
@@ -22,7 +24,17 @@ internal suspend fun RssHelper.discoverSourceFeed(inputUrl: String): DiscoveredF
             // 直接 XML 解析失败允许进入既有网页发现流程。
             error
         }
-        val candidates = discoverPageCandidates(inputUrl)
+        // 已知 Feed 托管地址不探测平台根目录的 /feed、/rss，更不能把错误页当来源。
+        if (isFeedburnerFeedUrl(inputUrl)) throw directError
+        val candidates = try {
+            discoverPageCandidates(inputUrl)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // 辅助网页发现失败不能覆盖第一次 Feed 请求的 HTTP/解析异常。
+            if (error !== directError) directError.addSuppressed(error)
+            throw directError
+        }
         for (candidateUrl in candidates) {
             currentCoroutineContext().ensureActive()
             try {

@@ -6,6 +6,8 @@ import me.ash.reader.domain.model.feed.SourceType
 import me.ash.reader.infrastructure.rsshub.RssHubProbeResult
 import me.ash.reader.infrastructure.source.SourceCandidateKind
 import me.ash.reader.infrastructure.source.SourceInputHint
+import me.ash.reader.infrastructure.source.isFeedburnerFeedUrl
+
 
 /** 延用已有探测预算，时间只约束对应阶段，不改造成全局任意上限。 */
 internal const val STRUCTURED_PROBE_TIMEOUT_MS = 20_000L
@@ -23,6 +25,10 @@ internal data class SubscribeDiscoveryResult(
 /** 保留 RSS/JSON 优先、RSSHub 次之、静态网站再动态网站的现有顺序。 */
 internal suspend fun SubscribeViewModel.discoverSources(options: SubscribeDiscoveryContext): SubscribeDiscoveryResult {
     if (options.explicitRoute != null) return discoverExplicitRoute(options)
+    // 托管 Feed 的失败仍是订阅读取失败，不进入 JSON/RSSHub/WebView 伪造可订阅来源。
+    // 成功仍必须经过真实 XML 解析；保留原始异常供输入页显示，不按域名宣布成功。
+    if (isFeedburnerFeedUrl(options.feedLink)) return probeRssSource(options)
+
     val jsonFirst = options.isLocal && options.hint == SourceInputHint.JSON_LIKELY
     val first = if (jsonFirst) probeJsonSource(options) else probeRssSource(options)
     if (first.candidates.isNotEmpty()) return first
