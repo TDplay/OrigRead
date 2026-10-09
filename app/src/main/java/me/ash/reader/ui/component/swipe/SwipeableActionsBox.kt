@@ -13,9 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
@@ -27,6 +25,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
 import kotlin.math.roundToInt
 
 /**
@@ -79,13 +78,15 @@ fun SwipeableActionsBox(
     modifier = Modifier
       .onSizeChanged { state.layoutWidth = it.width }
       .absoluteOffset { IntOffset(x = state.offset.value.roundToInt(), y = 0) }
-      .drawOverContent { state.ripple.draw(scope = this) }
       .horizontalDraggable(
-        enabled = !state.isResettingOnRelease,
-        onDragStopped = {
-          scope.launch {
-            state.handleOnDragStopped()
+        onDragStarted = { state.handleOnDragStarted() },
+        onDragStopped = { velocity ->
+          scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            state.handleOnDragStopped(velocity)
           }
+        },
+        onDragCancelled = {
+          scope.launch(start = CoroutineStart.UNDISPATCHED) { state.handleOnDragStopped(cancelled = true) }
         },
         state = state.draggableState,
       ),
@@ -133,12 +134,5 @@ private fun ActionIconBox(
     verticalAlignment = Alignment.CenterVertically,
   ) {
     content()
-  }
-}
-
-private fun Modifier.drawOverContent(onDraw: DrawScope.() -> Unit): Modifier {
-  return drawWithContent {
-    drawContent()
-    onDraw(this)
   }
 }

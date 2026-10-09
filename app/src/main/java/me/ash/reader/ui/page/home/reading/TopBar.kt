@@ -2,10 +2,10 @@ package me.ash.reader.ui.page.home.reading
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -45,7 +45,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import me.ash.reader.R
@@ -54,9 +53,8 @@ import me.ash.reader.infrastructure.preference.ReadingPageTonalElevationPreferen
 import me.ash.reader.ui.component.base.FeedbackIconButton
 import me.ash.reader.ui.page.adaptive.NavigationAction
 
-private val sizeSpec = spring<IntSize>(stiffness = 700f)
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TopBar(
     isShow: Boolean,
@@ -87,7 +85,7 @@ fun TopBar(
                 if (isOutlined || !isScrolled) surface else surfaceContainer
             },
             label = "",
-            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+            animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
         )
 
     Box(modifier = Modifier.fillMaxSize().zIndex(1f), contentAlignment = Alignment.TopCenter) {
@@ -99,8 +97,10 @@ fun TopBar(
             )
             AnimatedVisibility(
                 visible = isShow,
-                enter = expandVertically(expandFrom = Alignment.Bottom, animationSpec = sizeSpec),
-                exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = sizeSpec),
+                enter = slideInVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { -it } +
+                fadeIn(MaterialTheme.motionScheme.fastEffectsSpec()),
+                exit = slideOutVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { -it } +
+                fadeOut(MaterialTheme.motionScheme.fastEffectsSpec()),
             ) {
                 TopAppBar(
                     title = {},
@@ -194,7 +194,7 @@ fun TopBar(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ReadingShareIconButton(
     modifier: Modifier,

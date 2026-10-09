@@ -2,12 +2,7 @@ package me.ash.reader.ui.page.home.reading
 
 
 import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.FloatExponentialDecaySpec
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateDecay
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.runtime.Composable
@@ -33,13 +28,13 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
+import me.ash.reader.ui.motion.OrigReadGestureMotion
 import me.ash.reader.ui.page.home.reading.PullToLoadDefaults.ContentOffsetMultiple
 import kotlin.math.abs
 import kotlin.math.sign
-
-private const val TAG = "PullToLoad"
 
 /**
  * A [NestedScrollConnection] that provides scroll events to a hoisted [state].
@@ -57,7 +52,7 @@ private class ReaderNestedScrollConnection(
     private val enabled: Boolean,
     private val onPreScroll: (Float) -> Float,
     private val onPostScroll: (Float) -> Float,
-    private val onRelease: () -> Unit,
+    private val onRelease: (Float) -> Float,
     private val onScroll: ((Float) -> Unit)? = null
 ) : NestedScrollConnection {
 
@@ -90,8 +85,8 @@ private class ReaderNestedScrollConnection(
     }
 
     override suspend fun onPreFling(available: Velocity): Velocity {
-        onRelease()
-        return Velocity.Zero
+        if (!enabled) return Velocity.Zero
+        return if (onRelease(available.y) != 0f) Velocity(0f, available.y) else Velocity.Zero
     }
 }
 
@@ -115,10 +110,7 @@ fun rememberPullToLoadState(
     onLoadPrevious: (() -> Unit)?,
     onLoadNext: (() -> Unit)?,
     loadThreshold: Dp = PullToLoadDefaults.loadThreshold(),
-    snapAnimationSpec: AnimationSpec<Float> = spring(
-        dampingRatio = Spring.DampingRatioLowBouncy,
-        stiffness = Spring.StiffnessLow
-    )
+    snapAnimationSpec: AnimationSpec<Float> = OrigReadGestureMotion.settleSpec
 ): PullToLoadState {
     require(loadThreshold > 0.dp) { "The load trigger must be greater than zero!" }
 
@@ -216,18 +208,19 @@ class PullToLoadState internal constructor(
     private var _threshold by mutableFloatStateOf(threshold)
     var isSettled by mutableStateOf(false)
 
+    private var settleJob: Job? = null
+    private var releaseHandled = false
+
     internal fun onPull(pullDelta: Float): Float {
+        if (pullDelta == 0f) return 0f
+        settleJob?.cancel()
+        releaseHandled = false
         isSettled = false
         val consumed = if (offsetPulled.signOpposites(offsetPulled + pullDelta)) {
             -offsetPulled
         } else {
             pullDelta
         }
-        /*
-                Log.d(
-                    TAG,
-                    "onPull: currentOffset = $offsetPulled, pullDelta = $pullDelta, consumed = $consumed"
-                )*/
         offsetPulled += consumed
         return consumed
     }
@@ -236,75 +229,37 @@ class PullToLoadState internal constructor(
         return if (offsetPulled.signOpposites(pullDelta)) onPull(pullDelta) else 0f
     }
 
-    internal fun onRelease(): Float {
-
-        when (status) {
-            Status.PulledDown -> {
-                onLoadPrevious.value?.let { it() } ?: animateDistanceTo(0f)
-
-            }
-
-            Status.PulledUp -> {
-                onLoadNext.value?.let { it() } ?: animateDistanceTo(0f)
-            }
-
-            else -> {
-                // Snap to 0f and hide the indicator
-                animateDistanceTo(0f)
-            }
+    internal fun onRelease(velocity: Float = 0f): Float {
+        if (releaseHandled || offsetPulled == 0f) return 0f
+        releaseHandled = true
+        val releasedOffset = offsetPulled
+        val action = when (status) {
+            Status.PulledDown -> onLoadPrevious.value
+            Status.PulledUp -> onLoadNext.value
+            else -> null
         }
-        return 0f
+        if (action != null) action() else animateDistanceTo(0f, velocity)
+        // The reader owns the velocity while displaced; don't also fling its body.
+        return releasedOffset
     }
 
-    // Make sure to cancel any existing animations when we launch a new one. We use this instead of
-    // Animatable as calling snapTo() on every drag delta has a one frame delay, and some extra
-    // overhead of running through the animation pipeline instead of directly mutating the state.
-    private val mutatorMutex = MutatorMutex()
     fun animateDistanceTo(
         targetValue: Float,
         velocity: Float = 0f,
         animationSpec: AnimationSpec<Float> = snapAnimationSpec
     ) {
-        animationScope.launch {
-            mutatorMutex.mutate {
-                val initialValue = offsetPulled
-                val isAnimateDown = targetValue < initialValue
-                animate(
-                    initialValue = initialValue,
-                    targetValue = targetValue,
-                    initialVelocity = velocity,
-                    animationSpec = animationSpec
-                ) { value, _ ->
-                    offsetPulled = value
-                    if (isAnimateDown) {
-                        if (value - targetValue < 10f) isSettled = true
-                    } else {
-                        if (targetValue - value < 10f) isSettled = true
-                    }
-                }
-            }
+        settleJob?.cancel()
+        settleJob = animationScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            isSettled = false
+            animate(
+                initialValue = offsetPulled,
+                targetValue = targetValue,
+                initialVelocity = velocity,
+                animationSpec = animationSpec,
+            ) { value, _ -> offsetPulled = value }
+            offsetPulled = targetValue
+            isSettled = true
         }
-    }
-
-    internal fun flingWithVelocity(initialVelocity: Float) {
-        animationScope.launch {
-            mutatorMutex.mutate {
-                animateDecay(
-                    initialValue = offsetPulled,
-                    initialVelocity = initialVelocity,
-                    animationSpec = FloatExponentialDecaySpec(
-                        frictionMultiplier = 3f,
-                        absVelocityThreshold = 10f
-                    )
-                ) { value, _ ->
-                    if (abs(value) > threshold) {
-                        cancel()
-                    } else {
-                        onPull(value - offsetPulled)
-                    }
-                }
-            }
-        }.invokeOnCompletion { animateDistanceTo(0f) }
     }
 
     internal fun setThreshold(threshold: Float) {
@@ -363,5 +318,5 @@ fun Modifier.pullToLoad(
         if (enabled) Modifier.offset {
             IntOffset(x = 0, y = contentOffsetY(state.offsetFraction))
         }
-        else this
+        else Modifier
     )

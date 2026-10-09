@@ -27,7 +27,7 @@ fun Modifier.alphaIndicationClickable(
     val isPressed by interactionSource.collectIsPressedAsState()
     val animatedAlpha by
         animateFloatAsState(
-            if (isPressed) .5f else 1f,
+            if (enabled && isPressed) .8f else 1f,
             animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
         )
 
@@ -55,7 +55,7 @@ fun Modifier.alphaIndicationSelectable(
     val isPressed by interactionSource.collectIsPressedAsState()
     val animatedAlpha by
         animateFloatAsState(
-            if (isPressed) .5f else 1f,
+            if (enabled && isPressed) .8f else 1f,
             animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
         )
 

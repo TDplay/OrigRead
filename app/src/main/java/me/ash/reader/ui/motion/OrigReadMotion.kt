@@ -3,9 +3,6 @@ package me.ash.reader.ui.motion
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -23,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlin.math.roundToInt
@@ -40,11 +38,11 @@ internal object OrigReadMotionGeometry {
     // Primary navigation must be obvious enough to establish hierarchy. The former 18% / 6%
     // travel was technically animated but looked almost like a hard cut on a phone-sized screen.
     const val NavigationForegroundFraction = 1f
-    const val NavigationBackgroundFraction = 0.42f
-    const val NavigationDepthScale = 0.82f
+    const val NavigationBackgroundFraction = 0.15f
+    const val NavigationDepthScale = 0.97f
+    const val NavigationBackgroundAlpha = 0.94f
 
     // Same-level state changes are intentionally less dramatic than page navigation.
-    const val FadeThroughScale = 0.90f
     const val VerticalVisibilityFraction = 0.28f
 
     const val PressedScale = 0.97f
@@ -79,7 +77,10 @@ fun origReadPushExit(motionScheme: MotionScheme): ExitTransition =
             targetScale = OrigReadMotionGeometry.NavigationDepthScale,
             animationSpec = motionScheme.defaultSpatialSpec(),
         ) +
-        fadeOut(animationSpec = motionScheme.fastEffectsSpec())
+        fadeOut(
+            targetAlpha = OrigReadMotionGeometry.NavigationBackgroundAlpha,
+            animationSpec = motionScheme.defaultEffectsSpec(),
+        )
 
 /** Background destination returning to the foreground during back navigation. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -92,7 +93,10 @@ fun origReadPopEnter(motionScheme: MotionScheme): EnterTransition =
             initialScale = OrigReadMotionGeometry.NavigationDepthScale,
             animationSpec = motionScheme.defaultSpatialSpec(),
         ) +
-        fadeIn(animationSpec = motionScheme.defaultEffectsSpec())
+        fadeIn(
+            initialAlpha = OrigReadMotionGeometry.NavigationBackgroundAlpha,
+            animationSpec = motionScheme.defaultEffectsSpec(),
+        )
 
 /** Current foreground destination leaving completely on back navigation. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -115,25 +119,21 @@ fun origReadNavigationTransform(
 ): ContentTransform =
     when (direction) {
         OrigReadMotionDirection.Forward ->
-            origReadPushEnter(motionScheme) togetherWith origReadPushExit(motionScheme)
+            (origReadPushEnter(motionScheme) togetherWith origReadPushExit(motionScheme)).apply {
+                targetContentZIndex = 1f
+            }
         OrigReadMotionDirection.Backward ->
-            origReadPopEnter(motionScheme) togetherWith origReadPopExit(motionScheme)
+            (origReadPopEnter(motionScheme) togetherWith origReadPopExit(motionScheme)).apply {
+                targetContentZIndex = -1f
+            }
     }
 
 /** Same-level content replacement where spatial direction would imply a false hierarchy. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun origReadFadeThroughTransform(): ContentTransform =
-    (fadeIn(animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec()) +
-        scaleIn(
-            initialScale = OrigReadMotionGeometry.FadeThroughScale,
-            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
-        )) togetherWith
-        (fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
-            scaleOut(
-                targetScale = OrigReadMotionGeometry.FadeThroughScale,
-                animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
-            ))
+    fadeIn(animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec()) togetherWith
+        fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec())
 
 /** Small UI entering the current layout: toolbar, status row, quick actions, etc. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -153,23 +153,12 @@ fun origReadVisibilityExit(): ExitTransition =
         animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
     ) + fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec())
 
-/** Shared bounds for text that changes typography/layout between two navigation scenes. */
-@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-fun Modifier.origReadSharedTextBounds(
-    key: String,
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
-): Modifier =
-    with(sharedTransitionScope) {
-        this@origReadSharedTextBounds.sharedBounds(
-            sharedContentState = rememberSharedContentState(key),
-            animatedVisibilityScope = animatedVisibilityScope,
-            enter = fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
-            exit = fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
-            resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(),
-        )
-    }
+/**
+ * Dynamic source titles belong to their page, including its clipping and navigation transform.
+ * Elevating them into a global shared overlay lets an outgoing list title cross the homepage
+ * heading and leaves the returning source row empty until the bounds animation finishes.
+ */
+fun Modifier.origReadSourceTitle(): Modifier = clipToBounds()
 
 /**
  * Adds lightweight pressed feedback to an existing clickable surface. The caller must pass the

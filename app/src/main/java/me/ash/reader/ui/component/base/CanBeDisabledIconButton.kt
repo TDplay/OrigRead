@@ -24,6 +24,7 @@ fun CanBeDisabledIconButton(
     size: Dp = 24.dp,
     contentDescription: String?,
     tint: Color = LocalContentColor.current,
+    animateIconChanges: Boolean = false,
     onClick: () -> Unit = {},
 ) {
     IconButton(
@@ -36,7 +37,14 @@ fun CanBeDisabledIconButton(
         )
     ) {
         if (imageVector != null) {
-            Icon(
+            if (animateIconChanges) {
+                OrigReadAnimatedIcon(
+                    modifier = Modifier.size(size),
+                    imageVector = imageVector,
+                    contentDescription = contentDescription,
+                    tint = if (disabled) MaterialTheme.colorScheme.outline else tint,
+                )
+            } else Icon(
                 modifier = Modifier.size(size),
                 imageVector = imageVector,
                 contentDescription = contentDescription,

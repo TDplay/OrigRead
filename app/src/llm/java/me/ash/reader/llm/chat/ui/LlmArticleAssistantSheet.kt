@@ -150,6 +150,8 @@ import me.ash.reader.llm.runtime.LlmContextType
 import me.ash.reader.llm.runtime.LlmToolDescriptor
 import me.ash.reader.llm.search.WebSearchMode
 import me.ash.reader.llm.search.WebSearchRequestStatus
+import me.ash.reader.ui.motion.OrigReadMessageEntranceRegistry
+import me.ash.reader.ui.motion.origReadMessageEntrance
 import me.ash.reader.ui.motion.origReadFadeThroughTransform
 import me.ash.reader.ui.motion.origReadVisibilityEnter
 import me.ash.reader.ui.motion.origReadVisibilityExit
@@ -214,6 +216,7 @@ fun LlmArticleAssistantSheet(
     val uiState by viewModel.uiState.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
+    val messageEntrances = remember(articleContext.articleId) { OrigReadMessageEntranceRegistry(System.currentTimeMillis()) }
     val inputFocusRequester = remember { FocusRequester() }
     var input by rememberSaveable(articleContext.articleId) { mutableStateOf("") }
     var historyExpanded by remember { mutableStateOf(false) }
@@ -598,13 +601,14 @@ fun LlmArticleAssistantSheet(
                                 verticalArrangement = Arrangement.spacedBy(18.dp),
                             ) {
                                 items(uiState.messages, key = LlmMessageEntity::id) { message ->
+                                    val animateEntrance = remember(message.id) { messageEntrances.shouldAnimate(message.id, message.createdAt) }
                                     val messageContextRefs =
                                         contextRefsByAssistantId[message.id].orEmpty()
                                     val messageCitationRefs =
                                         citationRefsByAssistantId[message.id].orEmpty()
                                     val messageCitationAnnotations =
                                         citationAnnotationsByAssistantId[message.id].orEmpty()
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Column(modifier = Modifier.origReadMessageEntrance(animateEntrance), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         AssistantMessage(
                                             message = message,
                                             citationReturnDisplayOrder =

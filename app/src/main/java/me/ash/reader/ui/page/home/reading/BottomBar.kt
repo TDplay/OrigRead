@@ -2,9 +2,10 @@ package me.ash.reader.ui.page.home.reading
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -40,7 +41,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import me.ash.reader.R
@@ -49,9 +49,8 @@ import me.ash.reader.infrastructure.preference.ReadingPageTonalElevationPreferen
 import me.ash.reader.infrastructure.translation.TranslationTarget
 import me.ash.reader.ui.component.base.CanBeDisabledIconButton
 
-private val sizeSpec = spring<IntSize>(stiffness = 700f)
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BottomBar(
     isShow: Boolean,
@@ -91,8 +90,10 @@ fun BottomBar(
     ) {
         AnimatedVisibility(
             visible = isShow,
-            enter = expandVertically(expandFrom = Alignment.Top, animationSpec = sizeSpec),
-            exit = shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = sizeSpec)
+            enter = slideInVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { it } +
+                fadeIn(MaterialTheme.motionScheme.fastEffectsSpec()),
+            exit = slideOutVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { it } +
+                fadeOut(MaterialTheme.motionScheme.fastEffectsSpec())
         ) {
             val view = LocalView.current
             Column {
@@ -124,6 +125,7 @@ fun BottomBar(
                                 CanBeDisabledIconButton(
                                     modifier = Modifier.size(40.dp),
                                     disabled = false,
+                                    animateIconChanges = true,
                                     imageVector =
                                         if (isUnread) Icons.Filled.FiberManualRecord
                                         else Icons.Outlined.FiberManualRecord,
@@ -142,6 +144,7 @@ fun BottomBar(
                                 CanBeDisabledIconButton(
                                     modifier = Modifier.size(40.dp),
                                     disabled = false,
+                                    animateIconChanges = true,
                                     imageVector =
                                         if (isStarred) Icons.Rounded.Star else Icons.Rounded.StarOutline,
                                     contentDescription =

@@ -2,13 +2,7 @@ package me.ash.reader.ui.page.home.reading
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +19,7 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -112,8 +107,6 @@ import me.ash.reader.ui.page.adaptive.shouldDismissAssistantBeforeReaderNavigati
 import me.ash.reader.ui.page.adaptive.shouldTemporarilyHideListForAssistant
 import me.ash.reader.ui.page.home.reading.tts.TtsButton
 
-private const val UPWARD = 1
-private const val DOWNWARD = -1
 private val ArticleAssistantPaneWidth = 384.dp
 
 private val PendingCitationNavigationStateSaver =
@@ -474,6 +467,9 @@ fun ReadingPage(
             aiAssistantEnabled &&
             articleAssistantContext != null &&
             assistantPresentation != OrigReadArticleAssistantPresentation.BottomSheet
+    val assistantPaneTransition = remember(assistantPresentation) { MutableTransitionState(false) }
+    assistantPaneTransition.targetState = assistantPaneVisible
+    val assistantPaneRetained = assistantPaneTransition.retainsContent
     val foldReaderAssistantRegions =
         remember(adaptiveLayoutProfile, layoutDirection) {
             foldReaderAssistantRegions(
@@ -482,7 +478,7 @@ fun ReadingPage(
             )
         }
     val foldManagedAssistant =
-        assistantPaneVisible &&
+        assistantPaneRetained &&
             (adaptiveLayoutProfile.foldLayoutInfo.hasSeparatingVerticalHinge ||
                 assistantPresentation == OrigReadArticleAssistantPresentation.TabletopSupportingPane)
     val readerTargetRegion =
@@ -496,24 +492,18 @@ fun ReadingPage(
     val temporarilyHidesListForAssistant =
         shouldTemporarilyHideListForAssistant(
             profile = adaptiveLayoutProfile,
-            assistantPaneVisible = assistantPaneVisible,
+            assistantPaneVisible = assistantPaneRetained,
         )
-    val assistantPaneReservedWidth by
-        animateDpAsState(
-            targetValue =
-                if (assistantPaneVisible && !foldManagedAssistant) ArticleAssistantPaneWidth else 0.dp,
-            animationSpec = motionScheme.defaultSpatialSpec(),
-            label = "article-assistant-pane-width",
-        )
-    // Spatial spring animations may overshoot slightly below 0dp while the pane closes.
-    // Padding rejects negative values, so clamp only at the layout boundary and preserve
-    // the existing motion parameters.
-    val assistantPanePadding = assistantPaneReservedWidth.coerceAtLeast(0.dp)
+    // Reserve the settled width once, retaining it until exit ends. Animating padding reflows
+    // every paragraph on every frame and shifts the reading position.
+    val assistantPanePadding =
+        if (assistantPaneRetained && !foldManagedAssistant)
+            ArticleAssistantPaneWidth else 0.dp
     val currentOnAssistantPaneVisibilityChange by
         rememberUpdatedState(onAssistantPaneVisibilityChange)
 
-    LaunchedEffect(assistantPaneVisible) {
-        currentOnAssistantPaneVisibilityChange(assistantPaneVisible)
+    LaunchedEffect(assistantPaneRetained) {
+        currentOnAssistantPaneVisibilityChange(assistantPaneRetained)
     }
     DisposableEffect(Unit) {
         onDispose { currentOnAssistantPaneVisibilityChange(false) }
@@ -829,61 +819,28 @@ fun ReadingPage(
                 }
 
                 val isNextArticleAvailable = readerState.nextArticle != null
-                val isPreviousArticleAvailable = readerState.previousArticle != null
 
                 if (readerState.articleId != null) {
                     // Content
-                    AnimatedContent(
-                        targetState = readerState,
-                        transitionSpec = {
-                            val direction =
-                                when {
-                                    initialState.nextArticle?.articleId == targetState.articleId ->
-                                        UPWARD
-                                    initialState.previousArticle?.articleId ==
-                                        targetState.articleId -> DOWNWARD
-                                    initialState.articleId == targetState.articleId -> {
-                                        when (targetState.content) {
-                                            is ReaderState.Description -> DOWNWARD
-                                            else -> UPWARD
-                                        }
-                                    }
-
-                                    else -> UPWARD
-                                }
-                            (slideInVertically(
-                                initialOffsetY = { (it * 0.2f * direction).toInt() },
-                                animationSpec = motionScheme.defaultSpatialSpec(),
-                            ) +
-                                fadeIn(
-                                    animationSpec = motionScheme.defaultEffectsSpec()
-                                )) togetherWith
-                                (slideOutVertically(
-                                    targetOffsetY = { (it * -0.2f * direction).toInt() },
-                                    animationSpec = motionScheme.defaultSpatialSpec(),
-                                ) +
-                                    fadeOut(
-                                        animationSpec = motionScheme.fastEffectsSpec()
-                                    ))
-                        },
-                        label = "",
-                    ) {
-                        remember { it }
-                            .run {
+                    ReaderAnimatedContent(state = readerState) { sceneState, revealModifier ->
+                        sceneState.run {
+                                val isCurrentScene = articleId == readerState.articleId
+                                val sceneCanLoadNext = isCurrentScene && nextArticle != null
+                                val sceneCanLoadPrevious = isCurrentScene && previousArticle != null
                                 val state =
                                     rememberPullToLoadState(
-                                        key = content,
+                                        key = articleId,
                                         onLoadNext =
-                                            if (isNextArticleAvailable) {
+                                            if (sceneCanLoadNext) {
                                                 {
-                                                    val (id, index) = readerState.nextArticle
+                                                    val (id, index) = requireNotNull(nextArticle)
                                                     onLoadArticle(id, index)
                                                 }
                                             } else null,
                                         onLoadPrevious =
-                                            if (isPreviousArticleAvailable) {
+                                            if (sceneCanLoadPrevious) {
                                                 {
-                                                    val (id, index) = readerState.previousArticle
+                                                    val (id, index) = requireNotNull(previousArticle)
                                                     onLoadArticle(id, index)
                                                 }
                                             } else null,
@@ -891,7 +848,6 @@ fun ReadingPage(
 
                                 val listState =
                                     rememberSaveable(
-                                        inputs = arrayOf(content),
                                         saver = LazyListState.Saver,
                                     ) {
                                         LazyListState()
@@ -899,13 +855,13 @@ fun ReadingPage(
 
                                 val scrollState = rememberScrollState()
                                 val webViewScrollState = rememberSaveable(
-                                    readerState.articleId, saver = WebViewReaderScrollState.Saver,
+                                    articleId, saver = WebViewReaderScrollState.Saver,
                                 ) { WebViewReaderScrollState() }
 
                                 val scope = rememberCoroutineScope()
 
                                 LaunchedEffect(bringToTop) {
-                                    if (bringToTop) {
+                                    if (bringToTop && isCurrentScene) {
                                         scope
                                             .launch {
                                                 if (readingRenderer == ReadingRendererPreference.WebView &&
@@ -922,7 +878,7 @@ fun ReadingPage(
                                     }
                                 }
 
-                                showTopDivider =
+                                val sceneShowTopDivider =
                                     snapshotFlow {
                                             if (readingRenderer == ReadingRendererPreference.WebView) {
                                                 if (content is ReaderState.Error) scrollState.value >= 120
@@ -932,6 +888,7 @@ fun ReadingPage(
                                             }
                                         }
                                         .collectAsStateValue(initial = false)
+                                if (isCurrentScene) showTopDivider = sceneShowTopDivider
 
                                 CompositionLocalProvider(
                                     LocalTextStyle provides
@@ -1002,7 +959,7 @@ fun ReadingPage(
                                         ) {
                                             Content(
                                                 modifier =
-                                                    Modifier.pullToLoad(
+                                                    revealModifier.pullToLoad(
                                                         state = state,
                                                         onScroll = { f ->
                                                             if (abs(f) > 2f)
@@ -1010,22 +967,22 @@ fun ReadingPage(
                                                         },
                                                         enabled = isPullToSwitchArticleEnabled,
                                                     ),
-                                                articleId = readerState.articleId,
+                                                articleId = articleId,
                                                 contentPadding = paddings,
                                                 // 摘要高度进入滚动内容本身，不再通过压缩 Content viewport 预留空间。
                                                 topBarSpacerHeight = 64.dp + summaryReservedHeight,
                                                 topContentPadding = paddings.calculateTopPadding(),
                                                 content =
-                                                    if (translationState.showTranslation) {
+                                                    if (isCurrentScene && translationState.showTranslation) {
                                                         visibleTranslation?.translatedContent
                                                             ?: content.text.orEmpty()
                                                     } else {
                                                         content.text.orEmpty()
                                                     },
-                                                isOriginalContent = !translationState.showTranslation,
-                                                nativeReaderAnchorState = nativeReaderAnchorState,
-                                                webViewReaderAnchorState = webViewReaderAnchorState,
-                                                readerEvidenceMarkerState = readerEvidenceMarkerState,
+                                                isOriginalContent = !isCurrentScene || !translationState.showTranslation,
+                                                nativeReaderAnchorState = nativeReaderAnchorState.takeIf { isCurrentScene },
+                                                webViewReaderAnchorState = webViewReaderAnchorState.takeIf { isCurrentScene },
+                                                readerEvidenceMarkerState = readerEvidenceMarkerState.takeIf { isCurrentScene },
                                                 onNativeReaderUserDrag = {
                                                     // 手指拖动拥有最高优先级；取消后任何 ready/reflow 都不得重放旧 request。
                                                     pendingCitationNavigation = null
@@ -1040,14 +997,14 @@ fun ReadingPage(
                                                 },
                                                 feedName = feedName,
                                                 title =
-                                                    if (translationState.showTranslation) {
+                                                    if (isCurrentScene && translationState.showTranslation) {
                                                         visibleTranslation?.translatedTitle
                                                             ?: title.toString()
                                                     } else {
                                                         title.toString()
                                                     },
                                                 originalTitle =
-                                                    if (translationState.showTranslation && visibleTranslation != null) {
+                                                    if (isCurrentScene && translationState.showTranslation && visibleTranslation != null) {
                                                         title.toString()
                                                     } else {
                                                         null
@@ -1095,9 +1052,17 @@ fun ReadingPage(
                                             )
                                             PullToLoadIndicator(
                                                 state = state,
-                                                canLoadPrevious = isPreviousArticleAvailable,
-                                                canLoadNext = isNextArticleAvailable,
+                                                canLoadPrevious = sceneCanLoadPrevious,
+                                                canLoadNext = sceneCanLoadNext,
                                             )
+                                            if (isCurrentScene && readerState.content == ReaderState.Loading &&
+                                                content != ReaderState.Loading) {
+                                                LinearProgressIndicator(
+                                                    modifier = Modifier.align(Alignment.TopCenter)
+                                                        .fillMaxWidth()
+                                                        .padding(top = paddings.calculateTopPadding() + 64.dp),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1170,6 +1135,7 @@ fun ReadingPage(
         OrigReadWindowRegionBox(targetRegion = assistantTargetRegion) {
         EditionArticleAssistantSheet(
             visible = showArticleAssistant && aiAssistantEnabled,
+            paneTransition = assistantPaneTransition,
             context = articleAssistantContext,
             articleAnalysisRequested = articleAnalysisRequested,
             onArticleAnalysisConsumed = { articleAnalysisRequested = false },

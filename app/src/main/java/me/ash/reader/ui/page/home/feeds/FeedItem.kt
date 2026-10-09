@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Badge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -15,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -25,7 +23,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import kotlinx.coroutines.launch
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.ui.component.FeedIcon
-import me.ash.reader.ui.component.base.OrigReadExtensibleVisibility
 import me.ash.reader.ui.page.home.feeds.drawer.feed.FeedOptionViewModel
 
 @Composable
@@ -85,18 +82,7 @@ private fun FeedItemImpl(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (feed.important != 0) {
-                Badge(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = MaterialTheme.colorScheme.outline,
-                    content = {
-                        Text(
-                            text = feed.important.toString(),
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    },
-                )
-            }
+            FeedUnreadBadge(feed.important)
         }
     }
 }
@@ -108,26 +94,23 @@ private fun FeedItemImpl(
 fun FeedItem(
     feed: Feed,
     isLastItem: () -> Boolean = { false },
-    isExpanded: () -> Boolean,
     titleModifier: Modifier = Modifier,
     feedOptionViewModel: FeedOptionViewModel = hiltViewModel(),
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
-    OrigReadExtensibleVisibility(visible = isExpanded()) {
-        FeedItemImpl(
-            feed = feed,
-            isLastItem = isLastItem,
-            titleModifier = titleModifier,
-            onClick = onClick,
-            onLongClick = onLongClick,
-            onLongClickCallback = { feedId ->
-                scope.launch {
-                    feedOptionViewModel.fetchFeed(feedId = feedId)
-                }
-            })
-    }
+    FeedItemImpl(
+        feed = feed,
+        isLastItem = isLastItem,
+        titleModifier = titleModifier,
+        onClick = onClick,
+        onLongClick = onLongClick,
+        onLongClickCallback = { feedId ->
+            scope.launch {
+                feedOptionViewModel.fetchFeed(feedId = feedId)
+            }
+        })
 }
 
 @Preview

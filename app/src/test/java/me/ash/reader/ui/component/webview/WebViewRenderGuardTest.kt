@@ -56,6 +56,25 @@ class WebViewRenderGuardTest {
         assertTrue(afterReset > second)
     }
 
+    @Test
+    fun `ready state survives unchanged renders and cannot be restored by stale callbacks`() {
+        val guard = WebViewRenderGuard()
+        val spec = renderSpec()
+        val first = requireNotNull(guard.beginReload(spec))
+        assertFalse(guard.isDocumentReady)
+        assertTrue(guard.markDocumentReady(first))
+        assertTrue(guard.isDocumentReady)
+        assertTrue(guard.beginReload(spec.copy()) == null)
+        assertTrue(guard.isDocumentReady)
+        val second = requireNotNull(guard.beginReload(spec.copy(content = "new body")))
+        assertFalse(guard.isDocumentReady)
+        assertFalse(guard.markDocumentReady(first))
+        assertTrue(guard.markDocumentReady(second))
+        guard.reset()
+        assertFalse(guard.isDocumentReady)
+        assertFalse(guard.markDocumentReady(second))
+    }
+
     /** 使用固定值覆盖所有会改变正文 HTML 的字段，避免测试只盯正文字符串。 */
     private fun renderSpec() =
         WebViewRenderSpec(

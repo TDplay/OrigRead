@@ -36,6 +36,10 @@ internal data class WebViewRenderSpec(
 internal class WebViewRenderGuard {
     private var lastSpec: WebViewRenderSpec? = null
     private var renderGeneration: Long = 0L
+    private var readyGeneration: Long? = null
+
+    val currentGeneration: Long get() = renderGeneration
+    val isDocumentReady: Boolean get() = readyGeneration == renderGeneration
 
     /**
      * 返回 true 表示调用方应重新生成并加载 HTML。
@@ -51,13 +55,21 @@ internal class WebViewRenderGuard {
     fun beginReload(spec: WebViewRenderSpec): Long? {
         if (!shouldReload(spec)) return null
         renderGeneration += 1
+        readyGeneration = null
         return renderGeneration
     }
 
     fun isCurrentGeneration(generation: Long): Boolean = generation == renderGeneration
 
+    fun markDocumentReady(generation: Long): Boolean {
+        if (lastSpec == null || !isCurrentGeneration(generation)) return false
+        readyGeneration = generation
+        return true
+    }
+
     fun reset() {
         lastSpec = null
+        readyGeneration = null
         // Invalidate callbacks still queued by the destroyed/replaced WebView.
         renderGeneration += 1
     }

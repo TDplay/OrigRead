@@ -1,5 +1,6 @@
 package me.ash.reader.ui.page.home.reading
 
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -22,6 +23,7 @@ import me.ash.reader.ui.page.adaptive.OrigReadArticleAssistantPresentation
 @Composable
 internal fun EditionArticleAssistantSheet(
     visible: Boolean,
+    paneTransition: MutableTransitionState<Boolean>,
     context: ArticleAssistantContext?,
     articleAnalysisRequested: Boolean,
     onArticleAnalysisConsumed: () -> Unit,
@@ -54,23 +56,34 @@ internal fun EditionArticleAssistantSheet(
             onDismiss = onCitationNavigationFailureConsumed,
         )
     }
-    if (!visible || context == null) return
-    LlmArticleAssistantSheet(
-        articleContext = context,
-        articleAnalysisRequested = articleAnalysisRequested,
-        onArticleAnalysisConsumed = onArticleAnalysisConsumed,
-        onOpenArticle = onOpenArticle,
-        showQuickSummary = showQuickSummary,
-        onNavigateReaderCitation = onNavigateReaderCitation,
-        onCitationExitAnimationComplete = onCitationExitAnimationComplete,
-        citationReturnTarget = citationReturnTarget,
-        onCitationReturnConsumed = onCitationReturnConsumed,
-        readerEvidenceMarkerState = readerEvidenceMarkerState,
-        continueGenerationInBackground = continueGenerationInBackground,
-        presentation = presentation,
-        modifier = modifier,
-        onDismiss = onDismiss,
-    )
+    if (context == null) return
+    val assistantContent: @Composable () -> Unit = {
+        LlmArticleAssistantSheet(
+            articleContext = context,
+            articleAnalysisRequested = articleAnalysisRequested,
+            onArticleAnalysisConsumed = onArticleAnalysisConsumed,
+            onOpenArticle = onOpenArticle,
+            showQuickSummary = showQuickSummary,
+            onNavigateReaderCitation = onNavigateReaderCitation,
+            onCitationExitAnimationComplete = onCitationExitAnimationComplete,
+            citationReturnTarget = citationReturnTarget,
+            onCitationReturnConsumed = onCitationReturnConsumed,
+            readerEvidenceMarkerState = readerEvidenceMarkerState,
+            continueGenerationInBackground = continueGenerationInBackground,
+            presentation = presentation,
+            modifier = if (presentation == OrigReadArticleAssistantPresentation.BottomSheet) modifier else Modifier,
+            onDismiss = onDismiss,
+        )
+    }
+    if (presentation == OrigReadArticleAssistantPresentation.BottomSheet) {
+        if (visible) assistantContent()
+    } else {
+        ReaderSupportingPane(
+            visibleState = paneTransition,
+            modifier = modifier,
+            tabletop = presentation == OrigReadArticleAssistantPresentation.TabletopSupportingPane,
+        ) { assistantContent() }
+    }
 }
 
 @Composable

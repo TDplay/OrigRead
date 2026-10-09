@@ -1,7 +1,6 @@
 package me.ash.reader.ui.component.swipe
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.gestures.DraggableState
 import androidx.compose.runtime.Composable
@@ -14,8 +13,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
+import me.ash.reader.ui.motion.OrigReadGestureMotion
 import kotlin.math.abs
 
 @Composable
@@ -43,7 +41,6 @@ class SwipeableActionsState internal constructor() {
 
   internal var layoutWidth: Int by mutableIntStateOf(0)
   internal var swipeThresholdPx: Float by mutableFloatStateOf(0f)
-  internal val ripple = SwipeRippleState()
 
   internal var actions: ActionFinder by mutableStateOf(
     ActionFinder(left = emptyList(), right = emptyList())
@@ -70,26 +67,35 @@ class SwipeableActionsState internal constructor() {
     return abs(offsetState.value) > swipeThresholdPx
   }
 
-  internal suspend fun handleOnDragStopped() = coroutineScope {
-    launch {
-      if (hasCrossedSwipeThreshold()) {
-        visibleAction?.let { action ->
-          swipedAction = action
-          action.value.onSwipe()
-          ripple.animate(action = action)
-        }
-      }
-    }
-    launch {
-      draggableState.drag(MutatePriority.PreventUserInput) {
+  private var dragActive = false
+  private var dragGeneration = 0L
+
+  internal fun handleOnDragStarted() {
+    dragGeneration++
+    dragActive = true
+    swipedAction = null
+  }
+
+  internal suspend fun handleOnDragStopped(velocity: Float = 0f, cancelled: Boolean = false) {
+    if (!dragActive) return
+    dragActive = false
+    val generation = dragGeneration
+    val action = if (!cancelled && hasCrossedSwipeThreshold()) visibleAction else null
+    swipedAction = action
+    action?.value?.onSwipe()
+    try {
+      // UserInput can interrupt this return; the next swipe never waits for it to finish.
+      draggableState.drag(MutatePriority.Default) {
         Animatable(offsetState.value).animateTo(
           targetValue = 0f,
-          animationSpec = tween(durationMillis = animationDurationMs),
+          animationSpec = OrigReadGestureMotion.settleSpec,
+          initialVelocity = velocity,
         ) {
           dragBy(value - offsetState.value)
         }
       }
-      swipedAction = null
+    } finally {
+      if (generation == dragGeneration) swipedAction = null
     }
   }
 }

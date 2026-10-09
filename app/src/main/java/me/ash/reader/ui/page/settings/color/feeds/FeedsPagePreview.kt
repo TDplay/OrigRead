@@ -117,11 +117,9 @@ fun FeedItemExpandSwitcher(isExpanded: Boolean) {
 @Stable
 @Composable
 fun FeedPreview(isExpanded: Boolean) {
-    FeedItem(
-        feed = generateFeedPreview(),
-        isLastItem = { true },
-        isExpanded = { isExpanded }
-    )
+    me.ash.reader.ui.component.base.OrigReadExtensibleVisibility(visible = isExpanded) {
+        FeedItem(feed = generateFeedPreview(), isLastItem = { true })
+    }
 }
 
 @Stable

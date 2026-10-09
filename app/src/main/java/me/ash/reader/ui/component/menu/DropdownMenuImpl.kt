@@ -1,9 +1,7 @@
 package me.ash.reader.ui.component.menu
 
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Column
@@ -95,16 +93,12 @@ fun DropdownMenuContent(
     // Menu open/close animation.
     @Suppress("DEPRECATION") val transition = updateTransition(expandedState, "DropDownMenu")
 
+    val spatialSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
     val scale by
     transition.animateFloat(
         transitionSpec = {
-            if (false isTransitioningTo true) {
-                // Dismissed to expanded
-                spring(dampingRatio = .6f, stiffness = Spring.StiffnessMedium)
-            } else {
-                // Expanded to dismissed.
-                spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
-            }
+            spatialSpec
         }
     ) { expanded ->
         if (expanded) ExpandedScaleTarget else ClosedScaleTarget
@@ -113,13 +107,7 @@ fun DropdownMenuContent(
     val alpha by
     transition.animateFloat(
         transitionSpec = {
-            if (false isTransitioningTo true) {
-                // Dismissed to expanded
-                MaterialTheme.motionScheme.fastEffectsSpec()
-            } else {
-                // Expanded to dismissed.
-                spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)
-            }
+            effectsSpec
         }
     ) { expanded ->
         if (expanded) ExpandedAlphaTarget else ClosedAlphaTarget
@@ -158,9 +146,7 @@ fun DropdownMenuContent(
 internal val MenuVerticalMargin = 48.dp
 internal val DropdownMenuVerticalPadding = 8.dp
 
-internal const val InTransitionDuration = 200
-internal const val OutTransitionDuration = 100
 internal const val ExpandedScaleTarget = 1f
-internal const val ClosedScaleTarget = 0.6f
+internal const val ClosedScaleTarget = 0.97f
 internal const val ExpandedAlphaTarget = 1f
 internal const val ClosedAlphaTarget = 0f

@@ -1,14 +1,16 @@
 package me.ash.reader.ui.page.home.feeds
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -27,11 +29,10 @@ import me.ash.reader.R
 import me.ash.reader.domain.model.group.Group
 import me.ash.reader.domain.model.group.GroupWithFeed
 import me.ash.reader.ui.page.home.feeds.drawer.group.GroupOptionViewModel
-import me.ash.reader.ui.motion.origReadFadeThroughTransform
 import me.ash.reader.ui.theme.Shape32
 import me.ash.reader.ui.theme.ShapeTop32
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun GroupItem(
     group: Group,
@@ -43,7 +44,10 @@ fun GroupItem(
     groupOnClick: () -> Unit = {},
 ) {
     val view = LocalView.current
-    val fadeThroughTransform = origReadFadeThroughTransform()
+    val expanded = isExpanded()
+    val rotation by animateFloatAsState(
+        if (expanded) 180f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "feed-group-chevron",
+    )
 
     Column(
         modifier = Modifier
@@ -85,18 +89,12 @@ fun GroupItem(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AnimatedContent(
-                    targetState = isExpanded(),
-                    transitionSpec = { fadeThroughTransform },
-                    label = "feed-group-expanded",
-                ) { expanded ->
-                    Icon(
-                        imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        contentDescription =
-                            stringResource(if (expanded) R.string.expand_less else R.string.expand_more),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                }
+                Icon(
+                    modifier = Modifier.graphicsLayer { rotationZ = rotation },
+                    imageVector = Icons.Rounded.ExpandMore,
+                    contentDescription = stringResource(if (expanded) R.string.expand_less else R.string.expand_more),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
             }
         }
         Spacer(modifier = Modifier.height(22.dp))

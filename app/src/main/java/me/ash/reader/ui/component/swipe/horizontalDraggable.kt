@@ -47,12 +47,14 @@ internal fun Modifier.horizontalDraggable(
   startDragImmediately: Boolean = false,
   onDragStarted: suspend CoroutineScope.(startedPosition: Offset) -> Unit = {},
   onDragStopped: suspend CoroutineScope.(velocity: Float) -> Unit = {},
+  onDragCancelled: suspend CoroutineScope.() -> Unit = {},
 ): Modifier = this then DraggableElement(
   state = state,
   enabled = enabled,
   startDragImmediately = { startDragImmediately },
   onDragStarted = onDragStarted,
   onDragStopped = { velocity -> onDragStopped(velocity.x) },
+  onDragCancelled = onDragCancelled,
 )
 
 internal data class DraggableElement(
@@ -61,6 +63,7 @@ internal data class DraggableElement(
   private val startDragImmediately: () -> Boolean,
   private val onDragStarted: suspend CoroutineScope.(startedPosition: Offset) -> Unit,
   private val onDragStopped: suspend CoroutineScope.(velocity: Velocity) -> Unit,
+  private val onDragCancelled: suspend CoroutineScope.() -> Unit,
 ) : ModifierNodeElement<DraggableNode>() {
 
   override fun create(): DraggableNode = DraggableNode(
@@ -69,6 +72,7 @@ internal data class DraggableElement(
     startDragImmediately,
     onDragStarted,
     onDragStopped,
+    onDragCancelled,
   )
 
   override fun update(node: DraggableNode) {
@@ -78,6 +82,7 @@ internal data class DraggableElement(
       startDragImmediately = startDragImmediately,
       onDragStarted = onDragStarted,
       onDragStopped = onDragStopped,
+      onDragCancelled = onDragCancelled,
     )
   }
 
@@ -97,6 +102,7 @@ internal class DraggableNode(
   private var startDragImmediately: () -> Boolean,
   private var onDragStarted: suspend CoroutineScope.(startedPosition: Offset) -> Unit,
   private var onDragStopped: suspend CoroutineScope.(velocity: Velocity) -> Unit,
+  private var onDragCancelled: suspend CoroutineScope.() -> Unit,
 ) : DelegatingNode(), PointerInputModifierNode {
 
   private val velocityTracker = VelocityTracker()
@@ -125,11 +131,12 @@ internal class DraggableNode(
               if (event is DragStopped) {
                 onDragStopped.invoke(this, event.velocity)
               } else if (event is DragCancelled) {
-                onDragStopped.invoke(this, Velocity.Zero)
+                onDragCancelled.invoke(this)
               }
             }
           } catch (c: CancellationException) {
-            onDragStopped.invoke(this, Velocity.Zero)
+            onDragCancelled.invoke(this)
+            if (!isActive) throw c
           }
         }
       }
@@ -190,6 +197,7 @@ internal class DraggableNode(
     startDragImmediately: () -> Boolean,
     onDragStarted: suspend CoroutineScope.(startedPosition: Offset) -> Unit,
     onDragStopped: suspend CoroutineScope.(velocity: Velocity) -> Unit,
+    onDragCancelled: suspend CoroutineScope.() -> Unit,
   ) {
     var resetPointerInputHandling = false
     if (this.state != state) {
@@ -203,6 +211,7 @@ internal class DraggableNode(
     this.startDragImmediately = startDragImmediately
     this.onDragStarted = onDragStarted
     this.onDragStopped = onDragStopped
+    this.onDragCancelled = onDragCancelled
     if (resetPointerInputHandling) {
       pointerInputNode.resetPointerInputHandler()
     }

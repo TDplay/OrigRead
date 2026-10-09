@@ -151,6 +151,8 @@ fun OrigReadWebView(
     val viewportInsets = Triple(headerHeightPx, footerHeightPx, readableTopInsetPx)
     val currentViewportInsets by rememberUpdatedState(viewportInsets)
     val currentViewportScrollState by rememberUpdatedState(viewportScrollState)
+    val currentReaderAnchorState by rememberUpdatedState(readerAnchorState)
+    val boundReaderAnchorState = remember { mutableStateOf<WebViewReaderAnchorState?>(null) }
     val appliedViewportInsets = remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
 
     AndroidView(
@@ -191,12 +193,12 @@ fun OrigReadWebView(
                                         override fun onComplete(requestId: Long) {
                                             if (
                                                 requestId == generation &&
-                                                    renderGuard.isCurrentGeneration(generation)
+                                                    renderGuard.markDocumentReady(generation)
                                             ) {
                                                 (view as? ArticleSelectionWebView)?.let {
                                                     currentViewportScrollState?.markDocumentReady(it)
                                                 }
-                                                readerAnchorState?.markRenderReady(view, generation)
+                                                currentReaderAnchorState?.markRenderReady(view, generation)
                                             }
                                         }
                                     },
@@ -222,10 +224,13 @@ fun OrigReadWebView(
                     appliedViewportInsets.value = viewportInsets
                     applyReaderViewportInsets(viewportInsets)
                 }
-                renderGuard.beginReload(renderSpec)?.let { renderGeneration ->
-                    viewportScrollState?.prepareReload()
-                    Log.i("RLog", "maxWidth: ${maxWidth}")
-                    Log.i("RLog", "readingFont: ${context.filesDir.absolutePath}")
+                val nextGeneration = renderGuard.beginReload(renderSpec)
+                if (nextGeneration != null || boundReaderAnchorState.value !== readerAnchorState) {
+                    if (boundReaderAnchorState.value !== readerAnchorState) {
+                        boundReaderAnchorState.value?.unbind(this)
+                    }
+                    boundReaderAnchorState.value = readerAnchorState
+                    val renderGeneration = renderGuard.currentGeneration
                     readerAnchorState?.bindRender(
                         articleId = articleId,
                         originalContent = isOriginalContent,
@@ -236,16 +241,13 @@ fun OrigReadWebView(
                         markerForegroundCss = citationMarkerForegroundCss,
                         markerBackgroundCss = citationMarkerBackgroundCss,
                         highlightDurationMillis = citationHighlightDurationMillis,
-                        outerScrollHost =
-                            outerScrollState?.let { scrollState ->
-                                WebViewReaderOuterScrollHost(
-                                    scrollState = scrollState,
-                                    webViewTopInScrollContentPx = {
-                                        webViewTopInScrollContentPx.intValue
-                                    },
-                                    coroutineScope = citationScrollScope,
-                                )
-                            },
+                        outerScrollHost = outerScrollState?.let { scrollState ->
+                            WebViewReaderOuterScrollHost(
+                                scrollState = scrollState,
+                                webViewTopInScrollContentPx = { webViewTopInScrollContentPx.intValue },
+                                coroutineScope = citationScrollScope,
+                            )
+                        },
                         viewportScrollHost = viewportScrollState?.let {
                             WebViewReaderViewportScrollHost(
                                 coroutineScope = citationScrollScope,
@@ -253,6 +255,13 @@ fun OrigReadWebView(
                             )
                         },
                     )
+                    readerAnchorState?.setMarkerSnapshot(markerSnapshot)
+                    if (renderGuard.isDocumentReady) readerAnchorState?.markRenderReady(this, renderGeneration)
+                }
+                nextGeneration?.let { renderGeneration ->
+                    viewportScrollState?.prepareReload()
+                    Log.i("RLog", "maxWidth: ${maxWidth}")
+                    Log.i("RLog", "readingFont: ${context.filesDir.absolutePath}")
                     loadDataWithBaseURL(
                         webViewReaderBaseUrl(sourceUrl, renderGeneration),
                         WebViewHtml.HTML.format(
@@ -294,7 +303,8 @@ fun OrigReadWebView(
             view.onReaderUserDrag = null
             view.stopReaderFling()
             renderGuard.reset()
-            readerAnchorState?.unbind(view)
+            boundReaderAnchorState.value?.unbind(view)
+            boundReaderAnchorState.value = null
             view.stopLoading()
             view.configureSelectionAction(null, null)
             view.removeJavascriptInterface(JavaScriptInterface.NAME)

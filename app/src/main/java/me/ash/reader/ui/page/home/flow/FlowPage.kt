@@ -110,7 +110,7 @@ import me.ash.reader.ui.component.scrollbar.scrollIndicator
 import me.ash.reader.ui.ext.collectAsStateValue
 import me.ash.reader.ui.ext.openURL
 import me.ash.reader.ui.motion.Direction
-import me.ash.reader.ui.motion.origReadSharedTextBounds
+import me.ash.reader.ui.motion.origReadSourceTitle
 import me.ash.reader.ui.motion.sharedXAxisTransitionSlow
 import me.ash.reader.ui.motion.sharedYAxisTransitionExpressive
 import me.ash.reader.ui.page.adaptive.ArticleListReaderViewModel
@@ -188,13 +188,6 @@ fun FlowPage(
             filterUiState.feed != null -> filterUiState.feed.name
             else -> filterUiState.filter.toName()
         }
-    val sharedTitleKey =
-        when {
-            filterUiState.group != null -> "flow-title-group-${filterUiState.group.id}"
-            filterUiState.feed != null -> "flow-title-feed-${filterUiState.feed.id}"
-            else -> null
-        }
-
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     var markAsRead by remember { mutableStateOf(false) }
@@ -331,11 +324,13 @@ fun FlowPage(
             viewModel.listTranslation.discardExpired()
         }
     }
+    var translationRevealRevision by remember(pagerData) { mutableStateOf(0) }
     val translateList: (TranslationTarget?) -> Unit = { requestedTarget ->
         if (viewModel.listTranslation.state.value.isLoading && requestedTarget == null) {
             viewModel.listTranslation.stop()
         } else {
             val inputs = loadedTranslationInputs()
+            val wasShowingTranslation = viewModel.listTranslation.state.value.showTranslation
             viewModel.listTranslation.translateOrToggle(
                 scopeKey = pagerData, inputs = inputs,
                 target = requestedTarget ?: viewModel.listTranslation.state.value.target
@@ -343,6 +338,10 @@ fun FlowPage(
                 language = translationSettings.targetLanguage.trim().ifBlank { TranslationSettings.defaultTargetLanguage() },
                 forceShow = requestedTarget != null,
             )
+            // Only an immediate user display toggle reveals text. Async result arrivals do not.
+            if (viewModel.listTranslation.state.value.showTranslation != wasShowingTranslation) {
+                translationRevealRevision++
+            }
         }
     }
 
@@ -419,22 +418,9 @@ fun FlowPage(
                             val textStyle = LocalTextStyle.current
                             val color = LocalContentColor.current
                             if (textStyle.fontSize.value > 18f) {
-                                // LargeTopAppBar composes the same title lambda for both its expanded
-                                // and collapsed rows. Registering the same shared-content key in both
-                                // rows produces two active targets and can render duplicated/garbled
-                                // source titles during navigation. Only the expanded title is the
-                                // visual continuation of the source-list title.
-                                val expandedTitleModifier =
-                                    sharedTitleKey?.let { key ->
-                                        Modifier.origReadSharedTextBounds(
-                                            key = key,
-                                            sharedTransitionScope = sharedTransitionScope,
-                                            animatedVisibilityScope = animatedVisibilityScope,
-                                        )
-                                    } ?: Modifier
                                 BasicText(
                                     modifier =
-                                        expandedTitleModifier.padding(
+                                        Modifier.origReadSourceTitle().padding(
                                             start = if (articleListFeedIcon.value) 34.dp else 8.dp,
                                             end = 24.dp,
                                         ),
@@ -718,7 +704,7 @@ fun FlowPage(
                                     viewModel.markAllAsRead()
                                     currentPullToLoadState?.animateDistanceTo(
                                         targetValue = 0f,
-                                        animationSpec = settleSpec,
+                                        animationSpec = me.ash.reader.ui.motion.OrigReadGestureMotion.settleSpec,
                                     )
                                 }
                             }
@@ -733,7 +719,7 @@ fun FlowPage(
                                 viewModel.sync()
                                 currentPullToLoadState?.animateDistanceTo(
                                     targetValue = 0f,
-                                    animationSpec = settleSpec,
+                                    animationSpec = me.ash.reader.ui.motion.OrigReadGestureMotion.settleSpec,
                                 )
                             }
                         }
@@ -784,6 +770,7 @@ fun FlowPage(
                                 translations = if (listTranslationState.showTranslation && flowUiState.pagerData == pagerData)
                                     listTranslationState.translations else emptyMap(),
                                 translationDisplayMode = translationSettings.displayMode,
+                                translationRevealRevision = translationRevealRevision,
                                 isSwipeEnabled = { listState.isScrollInProgress },
                                 onClick = { articleWithFeed, index ->
                                     viewModel.listTranslation.stop()

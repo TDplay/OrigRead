@@ -151,7 +151,7 @@ fun Content(
         nativeAnchorTopInsetPx,
         renderer,
     ) {
-        if (
+        val boundGeneration = if (
             nativeReaderAnchorState != null &&
                 nativeReaderContent != null &&
                 renderer == ReadingRendererPreference.NativeComponent
@@ -164,10 +164,20 @@ fun Content(
                 listState = listState,
                 topInsetPx = nativeAnchorTopInsetPx,
             )
+            nativeReaderAnchorState.currentRenderGeneration()
         } else {
-            nativeReaderAnchorState?.unbind()
+            if (nativeReaderAnchorState?.currentArticleId() == articleId) {
+                nativeReaderAnchorState?.unbind()
+            }
+            null
         }
-        onDispose { nativeReaderAnchorState?.unbind() }
+        onDispose {
+            // An outgoing article must not detach the incoming article's newer binding.
+            if (boundGeneration != null &&
+                nativeReaderAnchorState?.currentRenderGeneration() == boundGeneration) {
+                nativeReaderAnchorState.unbind()
+            }
+        }
     }
 
     val textContentWidth = LocalTextContentWidth.current

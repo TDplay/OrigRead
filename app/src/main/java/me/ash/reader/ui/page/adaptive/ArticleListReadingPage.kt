@@ -2,6 +2,7 @@ package me.ash.reader.ui.page.adaptive
 
 import android.os.Parcelable
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -122,6 +124,9 @@ fun ArticleListReaderPage(
     // the whole Reading NavEntry, because doing so destroys the list/detail continuity and lets a
     // stale Detail destination leak into the next source opened from the home screen.
     var showSourcesInListPane by rememberSaveable { mutableStateOf(false) }
+    val listPaneStates = rememberSaveableStateHolder()
+    val listForward = me.ash.reader.ui.motion.sharedXAxisTransitionSlow(me.ash.reader.ui.motion.Direction.Forward)
+    val listBackward = me.ash.reader.ui.motion.sharedXAxisTransitionSlow(me.ash.reader.ui.motion.Direction.Backward)
     val isListTemporarilyHiddenForAssistant =
         shouldTemporarilyHideListForAssistant(
             profile = adaptiveLayoutProfile,
@@ -219,52 +224,60 @@ fun ArticleListReaderPage(
                 ) {
                     OrigReadWindowRegionBox(targetRegion = foldManagedListRegion) {
                         Box(modifier = Modifier.alpha(animatedListAlpha)) {
-                            if (isTwoPane && showSourcesInListPane) {
-                                FeedsPage(
-                                    sharedTransitionScope = sharedTransitionScope,
-                                    animatedVisibilityScope = animatedVisibilityScope,
-                                    navigateToSettings = onNavigateToSettings,
-                                    navigateToSourceDiscovery = onNavigateToSourceDiscovery,
-                                    navigationToFlow = {
-                                        // A collection change invalidates the previous detail
-                                        // selection. Keep the right reader while merely browsing
-                                        // sources, but once a source is chosen return the navigator
-                                        // to List so the old source's article cannot remain paired
-                                        // with the new article list.
-                                        showSourcesInListPane = false
-                                        viewModel.clearReadingData()
-                                        scope.launch {
-                                            navigator.navigateTo(
-                                                pane = ListDetailPaneScaffoldRole.List,
-                                            )
-                                        }
-                                    },
-                                    navigateToAccountList = onNavigateToAccountList,
-                                    navigateToAccountDetail = onNavigateToAccountDetail,
-                                )
-                            } else {
-                                FlowPage(
-                                    sharedTransitionScope = sharedTransitionScope,
-                                    animatedVisibilityScope = animatedVisibilityScope,
-                                    viewModel = viewModel,
-                                    onNavigateUp = {
-                                        when (articleListNavigateUpTarget(isTwoPane)) {
-                                            ArticleListNavigateUpTarget.SourceList -> {
-                                                showSourcesInListPane = true
-                                            }
-                                            ArticleListNavigateUpTarget.Parent -> onBack()
-                                        }
-                                    },
-                                    isTwoPane = isTwoPane,
-                                    navigateToArticle = { id, index ->
-                                        scope.launch {
-                                            navigator.navigateTo(
-                                                pane = ListDetailPaneScaffoldRole.Detail,
-                                                contentKey = ArticleData(articleId = id, listIndex = index),
-                                            )
-                                        }
-                                    },
-                                )
+                            AnimatedContent(
+                                targetState = isTwoPane && showSourcesInListPane,
+                                transitionSpec = { (if (targetState) listBackward else listForward).using(null) },
+                                label = "reader-list-sources",
+                            ) { sources ->
+                                listPaneStates.SaveableStateProvider(if (sources) "sources" else "flow") {
+                                    if (sources) {
+                                        FeedsPage(
+                                            sharedTransitionScope = sharedTransitionScope,
+                                            animatedVisibilityScope = animatedVisibilityScope,
+                                            navigateToSettings = onNavigateToSettings,
+                                            navigateToSourceDiscovery = onNavigateToSourceDiscovery,
+                                            navigationToFlow = {
+                                                // A collection change invalidates the previous detail
+                                                // selection. Keep the right reader while merely browsing
+                                                // sources, but once a source is chosen return the navigator
+                                                // to List so the old source's article cannot remain paired
+                                                // with the new article list.
+                                                showSourcesInListPane = false
+                                                viewModel.clearReadingData()
+                                                scope.launch {
+                                                    navigator.navigateTo(
+                                                        pane = ListDetailPaneScaffoldRole.List,
+                                                    )
+                                                }
+                                            },
+                                            navigateToAccountList = onNavigateToAccountList,
+                                            navigateToAccountDetail = onNavigateToAccountDetail,
+                                        )
+                                    } else {
+                                        FlowPage(
+                                            sharedTransitionScope = sharedTransitionScope,
+                                            animatedVisibilityScope = animatedVisibilityScope,
+                                            viewModel = viewModel,
+                                            onNavigateUp = {
+                                                when (articleListNavigateUpTarget(isTwoPane)) {
+                                                    ArticleListNavigateUpTarget.SourceList -> {
+                                                        showSourcesInListPane = true
+                                                    }
+                                                    ArticleListNavigateUpTarget.Parent -> onBack()
+                                                }
+                                            },
+                                            isTwoPane = isTwoPane,
+                                            navigateToArticle = { id, index ->
+                                                scope.launch {
+                                                    navigator.navigateTo(
+                                                        pane = ListDetailPaneScaffoldRole.Detail,
+                                                        contentKey = ArticleData(articleId = id, listIndex = index),
+                                                    )
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

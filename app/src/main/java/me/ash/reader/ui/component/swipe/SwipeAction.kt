@@ -13,17 +13,14 @@ import androidx.compose.ui.unit.dp
  *
  * @param background Color used as the background of [SwipeableActionsBox] while
  * this action is visible. If this action is swiped, its background color is
- * also used for drawing a ripple over the content for providing a visual
- * feedback to the user.
+ * retained behind the content while the row settles.
  *
  * @param weight The proportional width to give to this element, as related
  * to the total of all weighted siblings. [SwipeableActionsBox] will divide its
  * horizontal space and distribute it to actions according to their weight.
  *
- * @param isUndo Determines the direction in which a ripple is drawn when this
- * action is swiped. When false, the ripple grows from this action's position
- * to consume the entire composable, and vice versa. This can be used for
- * actions that can be toggled on and off.
+ * @param isUndo Semantic metadata for a toggled action; the settling motion is shared.
+
  */
 class SwipeAction(
   val onSwipe: () -> Unit,

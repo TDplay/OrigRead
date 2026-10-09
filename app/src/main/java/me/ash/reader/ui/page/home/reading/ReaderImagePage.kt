@@ -5,6 +5,14 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.rememberTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -54,23 +62,47 @@ import me.saket.telephoto.zoomable.zoomable
 
 data class ImageData(val imageUrl: String = "", val altText: String = "")
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ReaderImageViewer(
     imageData: ImageData,
     onDownloadImage: (String) -> Unit,
     onDismissRequest: () -> Unit = {},
 ) {
+    val visibleState = remember { MutableTransitionState(false) }
+    val latestDismiss by rememberUpdatedState(onDismissRequest)
+    var dismissRequested by remember { mutableStateOf(false) }
+    var dismissDelivered by remember { mutableStateOf(false) }
+    val requestDismiss: () -> Unit = {
+        dismissRequested = true
+        visibleState.targetState = false
+    }
+    LaunchedEffect(Unit) { if (!dismissRequested) visibleState.targetState = true }
+    LaunchedEffect(visibleState.isIdle, visibleState.currentState, dismissRequested) {
+        if (dismissRequested && !dismissDelivered && visibleState.isIdle && !visibleState.currentState) {
+            dismissDelivered = true
+            latestDismiss()
+        }
+    }
+    val transition = rememberTransition(visibleState, label = "reader-image")
+    val shade by transition.animateFloat(
+        transitionSpec = { MaterialTheme.motionScheme.fastEffectsSpec() }, label = "image-shade",
+    ) { if (it) 1f else 0f }
+    val scale by transition.animateFloat(
+        transitionSpec = { MaterialTheme.motionScheme.defaultSpatialSpec() }, label = "image-scale",
+    ) { if (it) 1f else 0.97f }
     Dialog(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = requestDismiss,
         properties =
             DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = shade.coerceIn(0f, 1f)))) {
             val view = LocalView.current
             val context = LocalContext.current
 
             val dialogWindowProvider = view.parent as? DialogWindowProvider
-            dialogWindowProvider?.window?.setDimAmount(1f)
+            dialogWindowProvider?.window?.setDimAmount(0f)
+            dialogWindowProvider?.window?.setWindowAnimations(0)
 
             val zoomableState = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 4f))
 
@@ -97,10 +129,11 @@ fun ReaderImageViewer(
                     Modifier.zoomable(
                             state = zoomableState,
                             clipToBounds = true,
-                            onClick = { onDismissRequest() },
+                            onClick = { requestDismiss() },
                             onLongClick = { expanded = true },
                         )
-                        .fillMaxSize(),
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = shade; scaleX = scale; scaleY = scale },
                 alignment = Alignment.Center,
                 contentScale = ContentScale.Inside,
             )
@@ -118,13 +151,13 @@ fun ReaderImageViewer(
                 )
 
             Row(
-                modifier = Modifier.fillMaxWidth().safeDrawingPadding().align(Alignment.TopCenter),
+                modifier = Modifier.fillMaxWidth().safeDrawingPadding().align(Alignment.TopCenter).graphicsLayer { alpha = shade },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
                     onClick = {
                         view.performHapticFeedback(HapticFeedbackConstantsCompat.KEYBOARD_TAP)
-                        onDismissRequest()
+                        requestDismiss()
                     },
                     colors =
                         IconButtonDefaults.iconButtonColors(

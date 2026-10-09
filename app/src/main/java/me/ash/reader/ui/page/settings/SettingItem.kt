@@ -9,7 +9,6 @@
 package me.ash.reader.ui.page.settings
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -39,7 +38,6 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import me.ash.reader.ui.motion.origReadPressFeedback
 import me.ash.reader.ui.theme.palette.LocalTonalPalettes
 import me.ash.reader.ui.theme.palette.onDark
 
@@ -62,12 +60,6 @@ fun SettingItem(
     val tonalPalettes = LocalTonalPalettes.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val pressedCorner by
-        animateDpAsState(
-            targetValue = if (enabled && isPressed) 20.dp else 0.dp,
-            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
-            label = "setting_item_corner",
-        )
     val pressedContainer by
         animateColorAsState(
             targetValue =
@@ -83,10 +75,9 @@ fun SettingItem(
     Surface(
         modifier = modifier
             .clickable(enabled = enabled, interactionSource = interactionSource) { onClick() }
-            .origReadPressFeedback(interactionSource = interactionSource, enabled = enabled)
             .alpha(if (enabled) 1f else 0.5f),
         color = pressedContainer,
-        shape = RoundedCornerShape(pressedCorner),
+        shape = RoundedCornerShape(16.dp),
     ) {
         Row(
             modifier = Modifier

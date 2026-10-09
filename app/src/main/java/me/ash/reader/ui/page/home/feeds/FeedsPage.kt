@@ -1,5 +1,8 @@
 package me.ash.reader.ui.page.home.feeds
 
+import me.ash.reader.ui.component.base.OrigReadExtensibleVisibility
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -79,7 +82,7 @@ import me.ash.reader.ui.ext.currentAccountId
 import me.ash.reader.ui.ext.getCurrentVersion
 import me.ash.reader.ui.ext.isOrigReadDefaultAccount
 import me.ash.reader.ui.ext.surfaceColorAtElevation
-import me.ash.reader.ui.motion.origReadSharedTextBounds
+import me.ash.reader.ui.motion.origReadSourceTitle
 import me.ash.reader.ui.page.common.RouteName
 import me.ash.reader.ui.page.home.feeds.accounts.AccountsTab
 import me.ash.reader.ui.page.home.feeds.drawer.feed.FeedOptionDrawer
@@ -296,15 +299,11 @@ fun FeedsPage(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 
-                    itemsIndexed(groupWithFeedList) { _, (group, feeds) ->
-                        GroupWithFeedsContainer {
+                    itemsIndexed(groupWithFeedList, key = { _, item -> item.group.id }) { _, (group, feeds) ->
+                        GroupWithFeedsContainer(modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) {
                             GroupItem(
                                 titleModifier =
-                                    Modifier.origReadSharedTextBounds(
-                                        key = "flow-title-group-${group.id}",
-                                        sharedTransitionScope = sharedTransitionScope,
-                                        animatedVisibilityScope = animatedVisibilityScope,
-                                    ),
+                                    Modifier.origReadSourceTitle(),
                                 isExpanded = {
                                     groupsVisible.getOrPut(group.id, groupListExpand::value)
                                 },
@@ -323,27 +322,28 @@ fun FeedsPage(
                                 navigationToFlow()
                             }
 
-                            feeds.forEachIndexed { index, feed ->
-                                FeedItem(
-                                    feed = feed,
-                                    titleModifier =
-                                        Modifier.origReadSharedTextBounds(
-                                            key = "flow-title-feed-${feed.id}",
-                                            sharedTransitionScope = sharedTransitionScope,
-                                            animatedVisibilityScope = animatedVisibilityScope,
-                                        ),
-                                    isLastItem = { index == feeds.lastIndex },
-                                    isExpanded = {
-                                        groupsVisible.getOrPut(feed.groupId, groupListExpand::value)
-                                    },
-                                    onClick = {
-                                        feedsViewModel.changeFilter(
-                                            filterState.copy(feed = feed, group = null)
-                                        )
-                                        navigationToFlow()
-                                    },
-                                    onLongClick = { scope.launch { feedDrawerState.show() } },
-                                )
+                            OrigReadExtensibleVisibility(
+                                visible = groupsVisible.getOrPut(group.id, groupListExpand::value),
+                            ) {
+                                Column {
+                                    feeds.forEachIndexed { index, feed ->
+                                        key(feed.id) {
+                                            FeedItem(
+                                                feed = feed,
+                                                titleModifier =
+                                                    Modifier.origReadSourceTitle(),
+                                                isLastItem = { index == feeds.lastIndex },
+                                                onClick = {
+                                                    feedsViewModel.changeFilter(
+                                                        filterState.copy(feed = feed, group = null)
+                                                    )
+                                                    navigationToFlow()
+                                                },
+                                                onLongClick = { scope.launch { feedDrawerState.show() } },
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

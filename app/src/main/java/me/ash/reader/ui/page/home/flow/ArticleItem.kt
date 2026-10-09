@@ -1,5 +1,9 @@
 package me.ash.reader.ui.page.home.flow
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
@@ -40,9 +45,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -93,6 +98,7 @@ fun ArticleItem(
     isUnread: Boolean = articleWithFeed.article.isUnread,
     translation: ListTranslationResult? = null,
     translationDisplayMode: TranslationDisplayMode = TranslationDisplayMode.TRANSLATED,
+    translationRevealRevision: Int = 0,
     onClick: (ArticleWithFeed) -> Unit = {},
     onLongClick: (() -> Unit)? = null,
 ) {
@@ -115,6 +121,7 @@ fun ArticleItem(
         translatedTitle = visibleTranslation?.title?.takeIf(String::isNotBlank),
         translatedDescription = visibleTranslation?.description?.takeIf(String::isNotBlank),
         bilingual = translationDisplayMode == TranslationDisplayMode.BILINGUAL,
+        translationRevealRevision = translationRevealRevision,
         timeString = article.dateString,
         imgData = article.img,
         isStarred = article.isStarred,
@@ -124,7 +131,7 @@ fun ArticleItem(
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ArticleItem(
     modifier: Modifier = Modifier,
@@ -135,6 +142,7 @@ fun ArticleItem(
     translatedTitle: String? = null,
     translatedDescription: String? = null,
     bilingual: Boolean = false,
+    translationRevealRevision: Int = 0,
     timeString: String? = null,
     imgData: Any? = null,
     isStarred: Boolean = false,
@@ -152,11 +160,21 @@ fun ArticleItem(
     val titleTypography = MaterialTheme.typography.titleMedium
     val displayTitle = if (bilingual) title else translatedTitle ?: title
     val displayDescription = if (bilingual) shortDescription else translatedDescription ?: shortDescription
+    val translationModeAlpha = me.ash.reader.ui.motion.rememberOrigReadContentAlpha(bilingual to translationRevealRevision)
     val titleStyle = remember(displayTitle, titleTypography) {
         titleTypography
             .applyTextDirection(displayTitle.requiresBidi())
             .merge(lineHeight = 22.sp)
     }
+    val readAlpha = animateFloatAsState(
+        targetValue = when (articleListReadIndicator) {
+            FlowArticleReadIndicatorPreference.None -> 1f
+            FlowArticleReadIndicatorPreference.AllRead -> if (isUnread) 1f else 0.5f
+            FlowArticleReadIndicatorPreference.ExcludingStarred -> if (isUnread || isStarred) 1f else 0.5f
+        },
+        animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
+        label = "article_read_alpha",
+    )
 
     Column(
         modifier =
@@ -165,19 +183,7 @@ fun ArticleItem(
                 .clip(Shape20)
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
                 .padding(horizontal = 12.dp, vertical = 12.dp)
-                .alpha(
-                    when (articleListReadIndicator) {
-                        FlowArticleReadIndicatorPreference.None -> 1f
-
-                        FlowArticleReadIndicatorPreference.AllRead -> {
-                            if (isUnread) 1f else 0.5f
-                        }
-
-                        FlowArticleReadIndicatorPreference.ExcludingStarred -> {
-                            if (isUnread || isStarred) 1f else 0.5f
-                        }
-                    }
-                )
+                .graphicsLayer { alpha = readAlpha.value }
     ) {
         // Top
         Row(
@@ -203,9 +209,7 @@ fun ArticleItem(
 
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier) {
                     // Starred
-                    if (isStarred) {
-                        StarredIcon()
-                    }
+                    StarredIndicator(isStarred)
 
                     if (articleListDate.value) {
                         // Time
@@ -230,9 +234,7 @@ fun ArticleItem(
                             style = MaterialTheme.typography.labelMedium,
                         )
                         // Starred
-                        if (isStarred) {
-                            StarredIcon()
-                        }
+                        StarredIndicator(isStarred)
                     }
                 }
             }
@@ -250,7 +252,7 @@ fun ArticleItem(
             }
 
             // Article
-            Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f).graphicsLayer { alpha = translationModeAlpha.value }) {
 
                 // Title
                 Row {
@@ -264,11 +266,7 @@ fun ArticleItem(
                         modifier = Modifier.weight(1f),
                     )
                     if (!articleListFeedName.value && !articleListDate.value) {
-                        if (isStarred) {
-                            StarredIcon()
-                        } else {
-                            Spacer(modifier = Modifier.width(16.dp))
-                        }
+                        StarredIndicator(isStarred)
                     }
                 }
 
@@ -359,6 +357,19 @@ fun StarredIcon(modifier: Modifier = Modifier) {
     )
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun StarredIndicator(visible: Boolean) {
+    val iconSize = with(LocalDensity.current) { LocalTextStyle.current.fontSize.toDp() }
+    Box(Modifier.size(iconSize), contentAlignment = Alignment.Center) {
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(MaterialTheme.motionScheme.fastEffectsSpec()),
+            exit = fadeOut(MaterialTheme.motionScheme.fastEffectsSpec()),
+        ) { StarredIcon() }
+    }
+}
+
 private const val PositionalThresholdFraction = 0.4f
 private const val SwipeActionDelay = 300L
 
@@ -370,6 +381,7 @@ fun SwipeableArticleItem(
     articleListTonalElevation: Int = 0,
     translation: ListTranslationResult? = null,
     translationDisplayMode: TranslationDisplayMode = TranslationDisplayMode.TRANSLATED,
+    translationRevealRevision: Int = 0,
     onClick: (ArticleWithFeed) -> Unit = {},
     isSwipeEnabled: () -> Boolean = { false },
     isMenuEnabled: Boolean = true,
@@ -422,6 +434,7 @@ fun SwipeableArticleItem(
                 isUnread = isUnread,
                 translation = translation,
                 translationDisplayMode = translationDisplayMode,
+                translationRevealRevision = translationRevealRevision,
                 onClick = onClick,
                 onLongClick = onLongClick,
             )

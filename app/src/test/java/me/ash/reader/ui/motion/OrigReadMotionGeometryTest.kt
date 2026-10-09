@@ -10,7 +10,7 @@ class OrigReadMotionGeometryTest {
         val width = 1000
 
         assertEquals(width, OrigReadMotionGeometry.foregroundOffset(width))
-        assertTrue(OrigReadMotionGeometry.backgroundOffset(width) in 300..600)
+        assertTrue(OrigReadMotionGeometry.backgroundOffset(width) in 120..180)
     }
 
     @Test
@@ -27,9 +27,8 @@ class OrigReadMotionGeometryTest {
     @Test
     fun `prominent motion geometry remains perceptible without overshooting`() {
         assertTrue(OrigReadMotionGeometry.NavigationForegroundFraction in 0.9f..1f)
-        assertTrue(OrigReadMotionGeometry.NavigationBackgroundFraction in 0.3f..0.6f)
-        assertTrue(OrigReadMotionGeometry.NavigationDepthScale in 0.75f..0.9f)
-        assertTrue(OrigReadMotionGeometry.FadeThroughScale in 0.85f..0.95f)
+        assertTrue(OrigReadMotionGeometry.NavigationBackgroundFraction in 0.12f..0.18f)
+        assertTrue(OrigReadMotionGeometry.NavigationDepthScale in 0.96f..0.98f)
         assertTrue(OrigReadMotionGeometry.PressedScale in 0.95f..0.99f)
         assertTrue(OrigReadMotionGeometry.PressedAlpha in 0.85f..1f)
     }
