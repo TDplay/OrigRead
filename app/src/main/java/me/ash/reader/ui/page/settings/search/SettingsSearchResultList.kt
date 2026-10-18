@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +49,7 @@ fun SettingsSearchResultItem(
     modifier: Modifier = Modifier,
 ) {
     val view = LocalView.current
+    val focusManager = LocalFocusManager.current
 
     Surface(
         modifier = modifier
@@ -55,6 +57,7 @@ fun SettingsSearchResultItem(
             .clip(RoundedCornerShape(16.dp))
             .clickable {
                 view.playSoundEffect(SoundEffectConstants.CLICK)
+                focusManager.clearFocus()
                 onClick(result.item.route)
             },
         shape = RoundedCornerShape(16.dp),
@@ -165,9 +168,13 @@ fun LazyGridScope.renderSettingsSearchResults(
             SettingsSearchEmptyView()
         }
     } else {
-        items(searchResults, key = { it.item.id }) { result ->
+        items(
+            items = searchResults,
+            key = { it.item.id },
+            span = { GridItemSpan(maxLineSpan) },
+        ) { result ->
             SettingsSearchResultItem(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 result = result,
                 onClick = onItemClick,
             )

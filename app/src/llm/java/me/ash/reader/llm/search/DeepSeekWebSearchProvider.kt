@@ -105,7 +105,11 @@ private fun parseDeepSeekSearchResult(item: JSONObject, includeContent: Boolean)
         title = item.deepSeekString("title"),
         url = resultUrl,
         snippet = item.deepSeekString("snippet"),
-        publishedAt = if (item.get("date") == JSONObject.NULL) null else item.deepSeekString("date"),
+        publishedAt = when (val dateVal = item.opt("date")) {
+            null, JSONObject.NULL -> null
+            is String -> dateVal
+            else -> throw JSONException("DeepSeek 字段 date 必须是字符串或 null")
+        },
         source = url.host,
         content = evidence.takeIf(String::isNotBlank),
     )

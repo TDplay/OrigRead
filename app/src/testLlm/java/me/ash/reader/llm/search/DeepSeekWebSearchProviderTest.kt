@@ -161,6 +161,9 @@ class DeepSeekWebSearchProviderTest {
         assertEquals(null, withoutContent.results.first().publishedAt)
         assertEquals("2026-10-17T00:00:00Z", withoutContent.results.last().publishedAt)
         assertEquals("long evidence\n\npage evidence", withContent.results.first().content)
+        val third = result().apply { remove("date") }
+        val withMissingDate = parseDeepSeekSearchResponse(profile, payload(third))
+        assertEquals(null, withMissingDate.results.single().publishedAt)
         assertTrue(parseDeepSeekSearchResponse(profile, payload()).results.isEmpty())
     }
 

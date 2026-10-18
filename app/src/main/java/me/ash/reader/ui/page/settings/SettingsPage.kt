@@ -234,7 +234,7 @@ fun SettingsPage(
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     SettingsSearchBar(
                         modifier = Modifier
-                            .padding(horizontal = 8.dp)
+                            .padding(horizontal = 16.dp)
                             .padding(bottom = 16.dp),
                         query = searchQuery,
                         onQueryChange = { searchQuery = it },
