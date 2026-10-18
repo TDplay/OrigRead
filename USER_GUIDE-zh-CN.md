@@ -170,6 +170,8 @@ Citation 让你在回答和原文之间来回核对。读到一个结论时，�
 
 在 **设置 → AI 阅读 → Web Search** 中配置搜索服务，按要求填写密钥和服务地址，先测试是否可用。
 
+使用 DeepSeek 时，在“添加搜索服务”中选择 **DeepSeek Search**，填写 DeepSeek API Key。默认地址为 `https://api.deepseek.com/v1/tools/search`，无需配置对话模型；搜索词按[官方接口要求](https://api-docs.deepseek.com/zh-cn/api/search/)最多 128 个 Unicode 字符。系统会完整保留你的问题，只缩短或省略自动补充的文章标题以适配上限；如果问题本身超过 128 个字符，搜索仍会明确报错。
+
 | 搜索模式 | 适合什么时候用 |
 | --- | --- |
 | **关闭** | 只想围绕已提供的内容讨论 |

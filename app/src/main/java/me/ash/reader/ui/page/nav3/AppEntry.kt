@@ -292,6 +292,7 @@ fun AppEntry(backStack: NavBackStack<NavKey>) {
                         NavEntry(key) {
                             SettingsPage(
                                 onBack = onBack,
+                                onNavigateToRoute = { backStack.add(it) },
                                 navigateToAccounts = { backStack.add(Route.Accounts) },
                                 navigateToColorAndStyle = { backStack.add(Route.ColorAndStyle) },
                                 navigateToInteraction = { backStack.add(Route.Interaction) },

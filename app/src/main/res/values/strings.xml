@@ -1513,4 +1513,6 @@
     <string name="json_repair_probe">Probe again</string>
     <string name="json_repair_confirm">Confirm rule replacement</string>
     <string name="json_repair_no_candidates">No working JSON rule was found. Check the URL and enabled rules.</string>
+    <string name="search_settings">Search settings</string>
+    <string name="no_settings_found">No matching settings found</string>
 </resources>

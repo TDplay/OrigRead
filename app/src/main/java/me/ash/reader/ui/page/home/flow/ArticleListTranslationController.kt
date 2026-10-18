@@ -14,6 +14,7 @@ import me.ash.reader.infrastructure.translation.TranslationException
 import me.ash.reader.infrastructure.translation.TranslationProviderType
 import me.ash.reader.infrastructure.translation.TranslationTarget
 import me.ash.reader.infrastructure.translation.storageKey
+import timber.log.Timber
 
 /** 不携带 Article/rawDescription/fullContent。feedId 用于持久缓存归属和删除。 */
 data class ListTranslationInput(val accountId: Int, val articleId: String, val title: String,
@@ -38,6 +39,7 @@ data class ListTranslationState(
     val translations: Map<String, ListTranslationResult> = emptyMap(), val isLoading: Boolean = false,
     val showTranslation: Boolean = false, val completed: Int = 0, val total: Int = 0,
     val stopped: Boolean = false, val errorMessage: String? = null,
+    val restoreRevision: Long = 0L,
 )
 
 /** 显式点击才能生成；restore 仅查本地。没有持久化作业、续翻游标或后台预翻译。 */
@@ -59,7 +61,9 @@ class ArticleListTranslationController(
     fun reset(scopeKey: Any? = null) {
         stop()
         manualVisibility = null
-        mutableState.value = ListTranslationState(scopeKey = scopeKey)
+        // Settings can reset the same pager without changing the loaded rows.
+        mutableState.value = ListTranslationState(scopeKey = scopeKey,
+            restoreRevision = mutableState.value.restoreRevision + 1L)
     }
 
     fun stop() {
@@ -81,7 +85,15 @@ class ArticleListTranslationController(
         val restored = rows.mapNotNull { row ->
             mutableState.value.translations[row.articleId]?.takeIf {
                 restoredRevision == revision && it.source == row && it.isFresh()
-            } ?: readCached(row, null, language)
+            } ?: try {
+                readCached(row, null, language)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // A failed local lookup must not crash the list or authorize a network fallback.
+                Timber.w(error, "Stored list translation could not be restored")
+                null
+            }
         }
         currentCoroutineContext().ensureActive()
         if (serial != generation || !isScopeCurrent(scopeKey, accountId) || mutableState.value.isLoading) return

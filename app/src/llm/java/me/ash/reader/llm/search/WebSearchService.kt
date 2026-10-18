@@ -23,6 +23,7 @@ class WebSearchService @Inject constructor(
     zhipu: ZhipuWebSearchProvider,
     keenable: KeenableWebSearchProvider,
     searxng: SearxngWebSearchProvider,
+    deepseek: DeepSeekWebSearchProvider,
 ) {
     private val adapters: Map<WebSearchProviderKind, WebSearchProviderAdapter> =
         listOf<WebSearchProviderAdapter>(
@@ -36,6 +37,7 @@ class WebSearchService @Inject constructor(
                 zhipu,
                 keenable,
                 searxng,
+                deepseek,
             )
             .associateBy(WebSearchProviderAdapter::kind)
 

@@ -1355,4 +1355,6 @@
     <string name="json_repair_probe">重新探测</string>
     <string name="json_repair_confirm">确认替换规则</string>
     <string name="json_repair_no_candidates">未找到可用的 JSON 规则，请检查页面地址和已启用规则。</string>
+    <string name="search_settings">搜索设置项</string>
+    <string name="no_settings_found">未找到相关设置项</string>
 </resources>

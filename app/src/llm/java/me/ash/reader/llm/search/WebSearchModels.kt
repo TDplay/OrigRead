@@ -151,6 +151,12 @@ enum class WebSearchProviderKind(
         requiresApiKey = false,
         supportsApiKey = false,
     ),
+    /** DeepSeek 独立网页搜索，使用用户配置的 DeepSeek API Key。 */
+    DEEPSEEK(
+        "DeepSeek Search",
+        "https://api.deepseek.com/v1/tools/search",
+        WebSearchBackendKind.RAW_SEARCH,
+    ),
 }
 
 /** 用户保存的一条 Web Search Provider 配置；API Key 由 SecureSecretStore 独立保存。 */

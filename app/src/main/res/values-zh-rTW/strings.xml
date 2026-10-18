@@ -886,4 +886,6 @@
     <string name="rsshub_unsupported_format_notice">此 RSSHub 傳回了暫不支援的格式（如 JSON）。請使用 RSS 或 Atom 輸出，例如將 format 改為 rss。</string>
     <string name="rsshub_auth_instance_notice">此 RSSHub 路由包含存取金鑰或存取碼。請填寫所屬實例的完整 HTTP/HTTPS 位址，避免將憑證傳送給其他實例。</string>
     <string name="rsshub_bound_instance_disabled_notice">此帶憑證訂閱所屬的 RSSHub 實例已被停用或刪除。請啟用原實例後再進行自動復原。</string>
+    <string name="search_settings">搜尋設定項</string>
+    <string name="no_settings_found">未找到相關設定項</string>
 </resources>

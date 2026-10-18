@@ -876,4 +876,6 @@
     <string name="rsshub_unsupported_format_notice">RSSHubからJSONなどの未対応形式が返されました。formatをrssにするなど、RSSまたはAtomを指定してください。</string>
     <string name="rsshub_auth_instance_notice">このルートにはキーやアクセスコードが含まれます。他のサーバーに送信しないよう、対応するサーバーの完全なHTTP/HTTPSのURLを入力してください。</string>
     <string name="rsshub_bound_instance_disabled_notice">認証情報付きフィードの元のサーバーが無効化または削除されています。自動復旧には元のサーバーを有効にしてください。</string>
+    <string name="search_settings">設定を検索</string>
+    <string name="no_settings_found">一致する設定が見つかりません</string>
 </resources>

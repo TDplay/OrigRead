@@ -882,4 +882,6 @@
     <string name="rsshub_unsupported_format_notice">O RSSHub retornou um formato não compatível, como JSON. Use RSS ou Atom; por exemplo, altere format para rss.</string>
     <string name="rsshub_auth_instance_notice">Esta rota inclui credenciais. Informe a URL HTTP/HTTPS completa do servidor correto para não enviá-las a outro.</string>
     <string name="rsshub_bound_instance_disabled_notice">O servidor deste feed com credenciais foi desativado ou removido. Reative o servidor original para recuperar automaticamente.</string>
+    <string name="search_settings">Pesquisar nas configurações</string>
+    <string name="no_settings_found">Nenhuma configuração encontrada</string>
 </resources>

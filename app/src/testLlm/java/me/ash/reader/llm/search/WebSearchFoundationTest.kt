@@ -46,6 +46,7 @@ class WebSearchFoundationTest {
                     zhipu = ZhipuWebSearchProvider(httpClient, Dispatchers.IO),
                     keenable = KeenableWebSearchProvider(httpClient, Dispatchers.IO),
                     searxng = SearxngWebSearchProvider(httpClient, Dispatchers.IO),
+                    deepseek = DeepSeekWebSearchProvider(httpClient, Dispatchers.IO),
                 )
             val frozenProfile =
                 WebSearchProviderProfile(

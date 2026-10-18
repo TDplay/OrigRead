@@ -882,4 +882,6 @@
     <string name="rsshub_unsupported_format_notice">RSSHub a renvoyé un format non pris en charge, comme JSON. Choisissez RSS ou Atom, par exemple en réglant format sur rss.</string>
     <string name="rsshub_auth_instance_notice">Cette route contient des identifiants. Saisissez l’URL HTTP/HTTPS complète du serveur concerné pour éviter de les envoyer ailleurs.</string>
     <string name="rsshub_bound_instance_disabled_notice">Le serveur de ce flux avec identifiants a été désactivé ou supprimé. Réactivez le serveur d’origine pour la restauration automatique.</string>
+    <string name="search_settings">Rechercher dans les paramètres</string>
+    <string name="no_settings_found">Aucun paramètre correspondant trouvé</string>
 </resources>

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -57,12 +58,20 @@ import me.ash.reader.ui.page.adaptive.LocalOrigReadAdaptiveLayoutProfile
 import me.ash.reader.ui.page.settings.tips.UpdateDialog
 import me.ash.reader.ui.page.settings.tips.UpdateViewModel
 import me.ash.reader.ui.theme.palette.onLight
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import me.ash.reader.ui.page.nav3.key.Route
+import me.ash.reader.ui.page.settings.search.SettingsSearchBar
+import me.ash.reader.ui.page.settings.search.SettingsSearchRegistry
+import me.ash.reader.ui.page.settings.search.renderSettingsSearchResults
 import java.util.Locale
 
 @Composable
 fun SettingsPage(
     updateViewModel: UpdateViewModel = hiltViewModel(),
     onBack: () -> Unit,
+    onNavigateToRoute: (Route) -> Unit = {},
     navigateToAccounts: () -> Unit,
     navigateToColorAndStyle: () -> Unit,
     navigateToInteraction: () -> Unit,
@@ -83,6 +92,14 @@ fun SettingsPage(
     val currentVersion by remember { mutableStateOf(context.getCurrentVersion()) }
     val adaptiveProfile = LocalOrigReadAdaptiveLayoutProfile.current
     val settingsColumns = adaptiveProfile.settingsRootColumnCount
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val searchResults = remember(searchQuery, context) {
+        SettingsSearchRegistry.search(context, searchQuery)
+    }
+
+    BackHandler(enabled = searchQuery.isNotEmpty()) {
+        searchQuery = ""
+    }
     val destinations =
         buildList {
             add(
@@ -215,41 +232,53 @@ fun SettingsPage(
                     DisplayText(text = stringResource(R.string.settings), desc = "")
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box {
-                        if (newVersion.whetherNeedUpdate(currentVersion, skipVersion)) {
-                            Banner(
-                                modifier = Modifier.zIndex(1f),
-                                title = stringResource(R.string.get_new_updates),
-                                desc = stringResource(
-                                    R.string.get_new_updates_desc,
-                                    newVersion.toString(),
-                                ),
-                                icon = Icons.Outlined.Lightbulb,
-                                action = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Close,
-                                        contentDescription = stringResource(R.string.close),
-                                    )
-                                },
-                            ) {
-                                updateViewModel.showDialog()
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
-                        }
-                        // Banner(
-                        //     title = stringResource(R.string.in_coding),
-                        //     desc = stringResource(R.string.coming_soon),
-                        //     icon = Icons.Outlined.Lightbulb,
-                        // )
-                    }
-                }
-                items(destinations) { destination ->
-                    SelectableSettingGroupItem(
-                        title = destination.title,
-                        desc = destination.desc,
-                        icon = destination.icon,
-                        onClick = destination.onClick,
+                    SettingsSearchBar(
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp)
+                            .padding(bottom = 16.dp),
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        onClear = { searchQuery = "" },
                     )
+                }
+                if (searchQuery.isNotEmpty()) {
+                    renderSettingsSearchResults(
+                        searchResults = searchResults,
+                        onItemClick = onNavigateToRoute,
+                    )
+                } else {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Box {
+                            if (newVersion.whetherNeedUpdate(currentVersion, skipVersion)) {
+                                Banner(
+                                    modifier = Modifier.zIndex(1f),
+                                    title = stringResource(R.string.get_new_updates),
+                                    desc = stringResource(
+                                        R.string.get_new_updates_desc,
+                                        newVersion.toString(),
+                                    ),
+                                    icon = Icons.Outlined.Lightbulb,
+                                    action = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = stringResource(R.string.close),
+                                        )
+                                    },
+                                ) {
+                                    updateViewModel.showDialog()
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                        }
+                    }
+                    items(destinations) { destination ->
+                        SelectableSettingGroupItem(
+                            title = destination.title,
+                            desc = destination.desc,
+                            icon = destination.icon,
+                            onClick = destination.onClick,
+                        )
+                    }
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Spacer(modifier = Modifier.height(24.dp))

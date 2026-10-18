@@ -310,7 +310,8 @@ fun FlowPage(
             }.toList()
     }
     // 只恢复屏幕附近已加载项的本地结果，不触发分页、网络或预翻译。
-    LaunchedEffect(pagerData, translationSettings.targetLanguage, showListDescription, translationCacheRevision) {
+    LaunchedEffect(pagerData, translationSettings.targetLanguage, showListDescription,
+        translationCacheRevision, listTranslationState.restoreRevision) {
         snapshotFlow { loadedTranslationInputs() }.collectLatest { inputs ->
             viewModel.listTranslation.restore(pagerData, inputs,
                 translationSettings.targetLanguage.trim().ifBlank { TranslationSettings.defaultTargetLanguage() },

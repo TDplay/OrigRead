@@ -137,3 +137,4 @@ test-results/
 *.db-shm
 *.db-wal
 
+.codestable

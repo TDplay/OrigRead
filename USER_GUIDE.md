@@ -170,6 +170,8 @@ Only the additional articles you select are supplied with your question. The ans
 
 Configure a search service in **Settings → AI Reading → Web Search**, supply its required key and endpoint, and test it first.
 
+For DeepSeek, choose **DeepSeek Search** under “Add search service” and enter your DeepSeek API key. The default endpoint is `https://api.deepseek.com/v1/tools/search`; no chat model configuration is required. The [official API](https://api-docs.deepseek.com/zh-cn/api/search/) accepts queries of up to 128 Unicode characters. Your question is kept in full; any automatically added article title is shortened or omitted to fit this limit. If your question itself exceeds 128 characters, the search produces an explicit error.
+
 | Search mode | When to use it |
 | --- | --- |
 | **Off** | Discuss only the supplied material |

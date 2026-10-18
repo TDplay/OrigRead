@@ -148,18 +148,25 @@ internal fun buildWebSearchPreparedRequest(
     perfTrace: me.ash.reader.infrastructure.ai.AiPerfTrace? = null,
 ): WebSearchPreparedRequest {
     if (!decision.triggered) return WebSearchPreparedRequest(decision = decision)
-    val query = buildSearchQuery(articleTitle, userInput)
     val selectedProvider =
         selectConfiguredSearchProvider(
             configuredProviders = configuredProviders,
             defaultProviderId = defaultProviderId,
         )
-        ?: return WebSearchPreparedRequest(
+    val query =
+        if (selectedProvider?.kind == WebSearchProviderKind.DEEPSEEK) {
+            buildDeepSeekSearchQuery(articleTitle, userInput)
+        } else {
+            buildSearchQuery(articleTitle, userInput)
+        }
+    if (selectedProvider == null) {
+        return WebSearchPreparedRequest(
             decision = decision,
             query = query,
             preflightErrorMessage = "尚未配置可用的 Web Search Provider",
             perfTrace = perfTrace,
         )
+    }
     val request =
         WebSearchRequest(
             query = query,
@@ -246,6 +253,29 @@ internal fun buildSearchQuery(
         input.contains(title, ignoreCase = true) -> input
         else -> "$title — $input"
     }.take(MAX_SEARCH_QUERY_LENGTH)
+}
+
+/**
+ * DeepSeek 只缩短自动补充的标题，完整保留用户问题，并在冻结 UI/Room query 前满足服务商长度限制。
+ * 用户问题本身超长时原样保留，由适配器明确报错；剩余空间不足以补标题时只搜索用户问题。
+ */
+private fun buildDeepSeekSearchQuery(
+    articleTitle: String?,
+    userInput: String,
+): String {
+    val title = articleTitle.orEmpty().trim()
+    val input = userInput.trim()
+    if (title.isBlank() || input.contains(title, ignoreCase = true)) return input
+
+    val separator = " — "
+    val titleBudget =
+        DEEPSEEK_MAX_QUERY_CODE_POINTS - input.codePointCount(0, input.length) - separator.length
+    if (titleBudget <= 0) return input
+
+    val titleCodePoints = title.codePointCount(0, title.length)
+    val titleEnd = title.offsetByCodePoints(0, minOf(titleCodePoints, titleBudget))
+    val searchTitle = title.substring(0, titleEnd).trimEnd()
+    return "$searchTitle$separator$input"
 }
 
 /** 把底层网络/协议异常收敛为带 Provider 名称的 FORCE 可读错误；AUTO UI 只展示通用软降级提示。 */
