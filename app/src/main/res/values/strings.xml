@@ -408,7 +408,7 @@
     <string name="origread_open_source_footer">Designed for focus · Open source</string>
     <string
     name="update_link" translatable="false">
-  https://api.github.com/repos/ZGMFX01A/OrigRead/releases/latest</string>
+  https://api.github.com/repos/TDplay/OrigRead/releases/latest</string>
     <string name="change_log">
   Changelog</string>
     <string name="update">Update</string>

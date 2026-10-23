@@ -57,7 +57,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           EDITION: ${{ github.event.inputs.edition || 'standard' }}
-          VERSION_CODE: ${{ github.event.inputs.version_code || '51' }}
+          VERSION_CODE: ${{ github.event.inputs.version_code }}
         run: |
           set -euo pipefail
           case "$EDITION" in
