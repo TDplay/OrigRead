@@ -25,7 +25,7 @@ fun fetchGitCommitHash(): String {
 val gitCommitHash = fetchGitCommitHash()
 val releaseVersion = System.getenv("RELEASE_VERSION")?.takeIf { it.isNotBlank() }
 // 标签构建优先采用发布标签；本地与普通分支构建默认使用当前正式版版本号。
-val normalizedVersionName = releaseVersion?.removePrefix("v") ?: "1.0.0"
+val normalizedVersionName = releaseVersion?.removePrefix("v") ?: "1.7.1"
 val keyProps = Properties()
 val releaseKeyPropsFile: File = rootProject.file("signature/keystore_release.properties")
 val debugKeyPropsFile: File = rootProject.file("signature/keystore.properties")
@@ -46,7 +46,7 @@ android {
         minSdk = 26
         targetSdk = 34
         // v1.0.0 正式版递增安装版本号，确保可覆盖升级此前的开发版本。
-        versionCode = 50
+        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 51
         versionName = normalizedVersionName
 
         buildConfigField(

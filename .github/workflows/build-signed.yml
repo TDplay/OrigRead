@@ -3,6 +3,9 @@ name: "Build Signed APK"
 on:
   workflow_dispatch:
     inputs:
+      version_code:
+        description: "versionCode (bump for every new build)"
+        default: "51"
       edition:
         description: "Edition to build"
         type: choice
@@ -53,6 +56,7 @@ jobs:
       - name: Build
         env:
           EDITION: ${{ github.event.inputs.edition || 'standard' }}
+          VERSION_CODE: ${{ github.event.inputs.version_code || '51' }}
         run: |
           set -euo pipefail
           case "$EDITION" in

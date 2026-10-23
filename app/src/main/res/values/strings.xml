@@ -272,7 +272,7 @@
     name="languages">Languages</string>
     <string name="help_translate">Help translate</string>
     <string
-    name="translatable_url" translatable="false">https://github.com/ZGMFX01A/OrigRead</string>
+    name="translatable_url" translatable="false">https://github.com/TDplay/OrigRead</string>
     <string
     name="use_device_languages">Use device language</string>
     <string name="english"
@@ -390,7 +390,7 @@
     <string
     name="open_source_licenses">Open source licenses</string>
     <string name="github_link"
-    translatable="false">https://github.com/ZGMFX01A/OrigRead</string>
+    translatable="false">https://github.com/TDplay/OrigRead</string>
     <string
     name="desktop_github_link" translatable="false">https://github.com/ZGMFX01A/OrigRead-Desktop</string>
     <string
