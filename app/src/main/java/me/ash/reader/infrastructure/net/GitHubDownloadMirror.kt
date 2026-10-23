@@ -8,11 +8,7 @@ private const val GITHUB_API_PREFIX = "https://api.github.com/"
 private const val GITHUB_LATEST_RELEASE_MARKER = "/releases/latest"
 private const val JSDELIVR_GITHUB_PACKAGE_API = "https://data.jsdelivr.com/v1/package/gh/"
 private val GITHUB_RELEASE_MIRROR_PREFIXES =
-    listOf(
-        // 2026-08 对真实 OrigRead v1.4.0 APK 做 Range 请求可用；仅作为官方地址失败后的兜底。
-        "https://ghfast.top/",
-        "https://gh.zwy.one/",
-    )
+    emptyList<String>() // [自建构建] 移除第三方 GitHub 加速镜像：镜像方可返回任意 APK，且上游签名私钥公开。
 
 /** 只对 GitHub Release 二进制资产生成镜像地址，不代理源码页、API 或任意第三方 URL。 */
 internal fun githubReleaseDownloadCandidates(

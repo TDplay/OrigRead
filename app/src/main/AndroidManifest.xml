@@ -60,7 +60,7 @@
         android:roundIcon="@drawable/origread_install_icon"
         android:supportsRtl="true"
         android:theme="@style/Theme.Reader"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
         <activity
             android:name=".ui.widget.WidgetConfigActivity"
             android:exported="false"
