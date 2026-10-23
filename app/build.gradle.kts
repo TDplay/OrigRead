@@ -46,7 +46,20 @@ android {
         minSdk = 26
         targetSdk = 34
         // v1.0.0 正式版递增安装版本号，确保可覆盖升级此前的开发版本。
-        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 51
+        // [自建构建] 版本号优先取 CI 注入；tag 构建时由 semver 推导（1.7.2 -> 10702），保证单调递增。
+        versionCode =
+            System.getenv("VERSION_CODE")?.toIntOrNull()
+                ?: releaseVersion
+                    ?.removePrefix("v")
+                    ?.split('.')
+                    ?.map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { v ->
+                        v.getOrElse(0) { 0 } * 10000 +
+                            v.getOrElse(1) { 0 } * 100 +
+                            v.getOrElse(2) { 0 }
+                    }
+                ?: 51
         versionName = normalizedVersionName
 
         buildConfigField(
