@@ -38,6 +38,7 @@ data class Settings(
     val flowArticleListFeedIcon: FlowArticleListFeedIconPreference = FlowArticleListFeedIconPreference.default,
     val flowArticleListFeedName: FlowArticleListFeedNamePreference = FlowArticleListFeedNamePreference.default,
     val flowArticleListImage: FlowArticleListImagePreference = FlowArticleListImagePreference.default,
+    val loadImagesOnMobile: LoadImagesOnMobilePreference = LoadImagesOnMobilePreference.default,
     val flowArticleListDesc: FlowArticleListDescPreference = FlowArticleListDescPreference.default,
     val flowArticleListTime: FlowArticleListTimePreference = FlowArticleListTimePreference.default,
     val flowArticleListDateStickyHeader: FlowArticleListDateStickyHeaderPreference = FlowArticleListDateStickyHeaderPreference.default,

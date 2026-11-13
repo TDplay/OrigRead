@@ -14,6 +14,7 @@ object WebViewLayout {
         context: Context,
         readingFontsPreference: ReadingFontsPreference,
         webViewClient: WebViewClient,
+        pauseNetworkImages: Boolean = false,
         onImageClick: ((imgUrl: String, altText: String) -> Unit)? = null,
     ) =
         ArticleSelectionWebView(context).apply {
@@ -41,6 +42,8 @@ object WebViewLayout {
                     }
                 domStorageEnabled = true
                 javaScriptEnabled = true
+                // 移动网络下按设置暂停正文图片，避免打开文章就吃掉几十兆。
+                blockNetworkImage = pauseNetworkImages
                 addJavascriptInterface(
                     object : JavaScriptInterface {
                         @JavascriptInterface

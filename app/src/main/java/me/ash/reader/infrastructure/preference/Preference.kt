@@ -43,6 +43,7 @@ fun Preferences.toSettings(): Settings {
         flowArticleListFeedIcon = FlowArticleListFeedIconPreference.fromPreferences(this),
         flowArticleListFeedName = FlowArticleListFeedNamePreference.fromPreferences(this),
         flowArticleListImage = FlowArticleListImagePreference.fromPreferences(this),
+        loadImagesOnMobile = LoadImagesOnMobilePreference.fromPreferences(this),
         flowArticleListDesc = FlowArticleListDescPreference.fromPreferences(this),
         flowArticleListTime = FlowArticleListTimePreference.fromPreferences(this),
         flowArticleListDateStickyHeader = FlowArticleListDateStickyHeaderPreference.fromPreferences(

@@ -94,6 +94,7 @@ class SettingsProvider @Inject constructor(
             LocalFlowArticleListFeedIcon provides settings.flowArticleListFeedIcon,
             LocalFlowArticleListFeedName provides settings.flowArticleListFeedName,
             LocalFlowArticleListImage provides settings.flowArticleListImage,
+            LocalLoadImagesOnMobile provides settings.loadImagesOnMobile,
             LocalFlowArticleListDesc provides settings.flowArticleListDesc,
             LocalFlowArticleListTime provides settings.flowArticleListTime,
             LocalFlowArticleListDateStickyHeader provides settings.flowArticleListDateStickyHeader,

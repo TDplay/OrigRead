@@ -469,6 +469,8 @@
     <string
     name="article_desc">文章描述</string>
     <string name="article_images">文章插图</string>
+    <string name="load_images_on_mobile">移动网络下加载图片</string>
+    <string name="load_images_on_mobile_desc">默认关闭以节省流量；关闭时仅在 Wi-Fi 下加载图片。</string>
     <string
     name="feed_names">订阅源名称</string>
     <string name="feed_favicons">订阅源图标</string>

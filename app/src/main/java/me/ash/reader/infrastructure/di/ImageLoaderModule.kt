@@ -15,6 +15,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
+import java.io.IOException
+import me.ash.reader.infrastructure.net.ImageNetworkPolicy
 import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
@@ -30,10 +32,21 @@ object ImageLoaderModule {
     fun provideImageLoader(
         @ApplicationContext context: Context,
         okHttpClient: OkHttpClient,
+        networkPolicy: ImageNetworkPolicy,
     ): ImageLoader {
+        // 计费网络下按设置拦截图片；OkHttp 拦截器只影响真正发出的请求，Coil 自身缓存不受影响。
+        val imageHttpClient =
+            okHttpClient
+                .newBuilder()
+                .addInterceptor { chain ->
+                    if (networkPolicy.shouldBlock()) {
+                        throw IOException("image loading paused on metered network")
+                    }
+                    chain.proceed(chain.request)
+                }
+                .build()
         return ImageLoader.Builder(context)
-            // Shared OKHttpClient instance.
-            .okHttpClient(okHttpClient)
+            .okHttpClient(imageHttpClient)
             // This slightly improves scrolling performance
             .dispatcher(Dispatchers.Default)
             .components {

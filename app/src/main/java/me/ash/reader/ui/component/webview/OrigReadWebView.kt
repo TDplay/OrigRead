@@ -24,6 +24,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.roundToInt
+import me.ash.reader.infrastructure.net.isMeteredNetwork
+import me.ash.reader.infrastructure.preference.LocalLoadImagesOnMobile
 import me.ash.reader.infrastructure.preference.LocalOpenLink
 import me.ash.reader.infrastructure.preference.LocalOpenLinkSpecificBrowser
 import me.ash.reader.infrastructure.preference.LocalReadingBoldCharacters
@@ -111,6 +113,11 @@ fun OrigReadWebView(
             "/android_res/font/google_sans_flex.ttf"
         } else null
 
+    val loadImagesOnMobile = LocalLoadImagesOnMobile.current
+    val blockNetworkImage = remember(loadImagesOnMobile) {
+        !loadImagesOnMobile.value && context.isMeteredNetwork()
+    }
+
     val preparedContent =
         remember(content, sourceUrl, isOriginalContent) {
             prepareWebViewReaderContent(content, sourceUrl, isOriginalContent)
@@ -170,6 +177,7 @@ fun OrigReadWebView(
             WebViewLayout.get(
                 context = context,
                 readingFontsPreference = readingFonts,
+                pauseNetworkImages = blockNetworkImage,
                 webViewClient =
                     WebViewClient(
                         context = context,

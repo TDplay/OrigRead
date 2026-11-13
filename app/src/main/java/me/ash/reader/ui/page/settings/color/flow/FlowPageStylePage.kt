@@ -33,6 +33,7 @@ fun FlowPageStylePage(
     val articleListFeedIcon = LocalFlowArticleListFeedIcon.current
     val articleListFeedName = LocalFlowArticleListFeedName.current
     val articleListImage = LocalFlowArticleListImage.current
+    val loadImagesOnMobile = LocalLoadImagesOnMobile.current
     val articleListDesc = LocalFlowArticleListDesc.current
     val articleListTime = LocalFlowArticleListTime.current
     val articleListStickyDate = LocalFlowArticleListDateStickyHeader.current
@@ -168,6 +169,17 @@ fun FlowPageStylePage(
                     ) {
                         OrigReadSwitch(activated = articleListImage.value) {
                             (!articleListImage).put(context, scope)
+                        }
+                    }
+                    SettingItem(
+                        title = stringResource(R.string.load_images_on_mobile),
+                        desc = stringResource(R.string.load_images_on_mobile_desc),
+                        onClick = {
+                            (!loadImagesOnMobile).put(context, scope)
+                        },
+                    ) {
+                        OrigReadSwitch(activated = loadImagesOnMobile.value) {
+                            (!loadImagesOnMobile).put(context, scope)
                         }
                     }
                     SettingItem(

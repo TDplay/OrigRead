@@ -568,6 +568,8 @@
     <string name="article_desc">Article previews</string>
     <string
     name="article_images">Article images</string>
+    <string name="load_images_on_mobile">Load images on mobile data</string>
+    <string name="load_images_on_mobile_desc">Off by default to save data. When off, images load only on Wi-Fi.</string>
     <string name="feed_names">Feed names</string>
     <string
     name="feed_favicons">Feed favicons</string>
