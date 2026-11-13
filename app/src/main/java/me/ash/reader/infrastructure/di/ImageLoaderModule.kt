@@ -42,7 +42,7 @@ object ImageLoaderModule {
                     if (networkPolicy.shouldBlock()) {
                         throw IOException("image loading paused on metered network")
                     }
-                    chain.proceed(chain.request)
+                    chain.proceed(chain.request())
                 }
                 .build()
         return ImageLoader.Builder(context)
