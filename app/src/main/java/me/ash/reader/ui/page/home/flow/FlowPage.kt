@@ -11,6 +11,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -81,12 +82,12 @@ import me.ash.reader.R
 import me.ash.reader.domain.data.PagerData
 import me.ash.reader.domain.model.article.ArticleFlowItem
 import me.ash.reader.domain.model.article.ArticleWithFeed
+import me.ash.reader.infrastructure.preference.LocalFlowArticleListCardStyle
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListDateStickyHeader
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListDesc
 import me.ash.reader.infrastructure.preference.FlowArticleListDescPreference
 import me.ash.reader.infrastructure.translation.TranslationTarget
 import me.ash.reader.infrastructure.translation.TranslationSettings
-import me.ash.reader.infrastructure.preference.LocalFlowArticleListFeedIcon
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListTonalElevation
 import me.ash.reader.infrastructure.preference.LocalFlowFilterBarPadding
 import me.ash.reader.infrastructure.preference.LocalFlowFilterBarStyle
@@ -136,7 +137,6 @@ fun FlowPage(
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val articleListTonalElevation = LocalFlowArticleListTonalElevation.current
-    val articleListFeedIcon = LocalFlowArticleListFeedIcon.current
     val articleListDateStickyHeader = LocalFlowArticleListDateStickyHeader.current
     val topBarTonalElevation = LocalFlowTopBarTonalElevation.current
     val filterBarStyle = LocalFlowFilterBarStyle.current
@@ -148,6 +148,7 @@ fun FlowPage(
 
     val openLink = LocalOpenLink.current
     val openLinkSpecificBrowser = LocalOpenLinkSpecificBrowser.current
+    val articleListCardStyle = LocalFlowArticleListCardStyle.current
 
     val settings = LocalSettings.current
     val pullToSwitchFeed = settings.pullToSwitchFeed
@@ -386,9 +387,11 @@ fun FlowPage(
 
     val isSyncing = viewModel.isSyncingFlow.collectAsStateValue()
 
+    val listBackground = articleListBackgroundColor(articleListCardStyle, articleListTonalElevation.value)
+
     Box(modifier = Modifier.fillMaxSize()) {
         OrigReadScaffold(
-            containerTonalElevation = articleListTonalElevation.value.dp,
+            containerTonalElevation = articleListPageElevation(articleListCardStyle, articleListTonalElevation.value),
             topBar = {
                 MaterialTheme(
                     colorScheme = MaterialTheme.colorScheme,
@@ -422,7 +425,8 @@ fun FlowPage(
                                 BasicText(
                                     modifier =
                                         Modifier.origReadSourceTitle().padding(
-                                            start = if (articleListFeedIcon.value) 34.dp else 8.dp,
+                                            // LargeTopAppBar already insets its expanded title by 16.dp.
+                                            start = ArticleListContentInset - 16.dp,
                                             end = 24.dp,
                                         ),
                                     text = titleText,
@@ -737,7 +741,9 @@ fun FlowPage(
                     Box(modifier = Modifier.fillMaxSize()) {
                         LazyColumn(
                             modifier =
-                                Modifier.pullToLoad(
+                                Modifier
+                                    .background(listBackground)
+                                    .pullToLoad(
                                         state = pullToLoadState,
                                         enabled = true,
                                         contentOffsetY = { fraction ->
@@ -765,9 +771,10 @@ fun FlowPage(
                             ArticleList(
                                 pagingItems = pagingItems,
                                 diffMap = viewModel.diffMapHolder.diffMap,
-                                isShowFeedIcon = articleListFeedIcon.value,
+                                isSingleFeed = filterState.feed != null && filterState.group == null,
                                 isShowStickyHeader = articleListDateStickyHeader.value,
                                 articleListTonalElevation = articleListTonalElevation.value,
+                                cardStyle = articleListCardStyle,
                                 translations = if (listTranslationState.showTranslation && flowUiState.pagerData == pagerData)
                                     listTranslationState.translations else emptyMap(),
                                 translationDisplayMode = translationSettings.displayMode,

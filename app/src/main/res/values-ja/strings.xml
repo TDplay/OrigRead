@@ -314,6 +314,7 @@
     <string name="initial_page">起動画面</string>
     <string name="initial_filter">既定のフィルター</string>
     <string name="preview_article_title">『黎明の剣』が完結してしまった</string>
+    <string name="preview_second_article_title">週末に読みたい記事</string>
     <string name="preview_article_desc">物語にはいつか終わりが来る。でも、ずっと一緒に過ごしてきた本だから、やっぱり寂しい。本編が終わっても謎はまだ残っているし、番外編はいつ読めるのかな。</string>
     <string name="preview_feed_name">うずまき書院</string>
     <string name="value">値</string>
@@ -339,6 +340,7 @@
     <string name="tips_article_list_tonal_elevation">記事一覧の階調はライトテーマでのみ反映されます</string>
     <string name="tips_group_list_tonal_elevation">グループ一覧の階調はライトテーマでのみ反映されます</string>
     <string name="share">共有</string>
+    <string name="list_shared_content">記事一覧から共有する内容</string>
     <string name="reading_share_config_title">閲覧画面から共有</string>
     <string name="reading_share_config_desc">共有する内容を選びます。元のURLは常に含まれます。</string>
     <string name="reading_share_first_use_title">共有内容を設定</string>
@@ -878,4 +880,7 @@
     <string name="rsshub_bound_instance_disabled_notice">認証情報付きフィードの元のサーバーが無効化または削除されています。自動復旧には元のサーバーを有効にしてください。</string>
     <string name="search_settings">設定を検索</string>
     <string name="no_settings_found">一致する設定が見つかりません</string>
+    <string name="article_list_style">記事一覧のスタイル</string>
+    <string name="article_list_style_divider">区切り線付きリスト</string>
+    <string name="article_list_style_segmented">日付別のグループカード</string>
 </resources>

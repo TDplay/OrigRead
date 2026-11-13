@@ -320,6 +320,7 @@
     <string name="initial_page">Écran d’accueil</string>
     <string name="initial_filter">Filtre par défaut</string>
     <string name="preview_article_title">La Lame de l’aube est finie, quelle tristesse</string>
+    <string name="preview_second_article_title">Une liste de lecture pour le week-end</string>
     <string name="preview_article_desc">Toute histoire a une fin, mais ce livre m’accompagne depuis si longtemps que j’ai du mal à lui dire adieu. L’intrigue principale est terminée, mais il reste des questions. À quand une histoire bonus ?</string>
     <string name="preview_feed_name">Bibliothèque du Tourbillon</string>
     <string name="value">Valeur</string>
@@ -345,6 +346,7 @@
     <string name="tips_article_list_tonal_elevation">La teinte de la liste d’articles ne s’applique qu’au thème clair</string>
     <string name="tips_group_list_tonal_elevation">La teinte de la liste des groupes ne s’applique qu’au thème clair</string>
     <string name="share">Partager</string>
+    <string name="list_shared_content">Partage depuis la liste d’articles</string>
     <string name="reading_share_config_title">Partager des articles</string>
     <string name="reading_share_config_desc">Choisissez le contenu à partager. Le lien d’origine est toujours inclus.</string>
     <string name="reading_share_first_use_title">Configurer le partage</string>
@@ -884,4 +886,7 @@
     <string name="rsshub_bound_instance_disabled_notice">Le serveur de ce flux avec identifiants a été désactivé ou supprimé. Réactivez le serveur d’origine pour la restauration automatique.</string>
     <string name="search_settings">Rechercher dans les paramètres</string>
     <string name="no_settings_found">Aucun paramètre correspondant trouvé</string>
+    <string name="article_list_style">Style de la liste d’articles</string>
+    <string name="article_list_style_divider">Liste avec séparateurs</string>
+    <string name="article_list_style_segmented">Cartes groupées par jour</string>
 </resources>

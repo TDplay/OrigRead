@@ -320,6 +320,7 @@
     <string name="initial_page">Pantalla inicial</string>
     <string name="initial_filter">Filtro inicial</string>
     <string name="preview_article_title">No puede ser: El filo del amanecer ha terminado</string>
+    <string name="preview_second_article_title">Una lista de lecturas para el fin de semana</string>
     <string name="preview_article_desc">Toda historia llega a su fin, pero este libro me ha acompañado tanto tiempo que cuesta despedirse. La trama principal terminó y aún quedan misterios. ¿Cuándo llegará una historia extra?</string>
     <string name="preview_feed_name">Biblioteca del Remolino</string>
     <string name="value">Valor</string>
@@ -345,6 +346,7 @@
     <string name="tips_article_list_tonal_elevation">El tono de la lista de artículos solo se aplica al tema claro</string>
     <string name="tips_group_list_tonal_elevation">El tono de la lista de grupos solo se aplica al tema claro</string>
     <string name="share">Compartir</string>
+    <string name="list_shared_content">Compartir desde la lista de artículos</string>
     <string name="reading_share_config_title">Compartir artículos</string>
     <string name="reading_share_config_desc">Elige qué compartir. El enlace original siempre se incluye.</string>
     <string name="reading_share_first_use_title">Configurar qué compartir</string>
@@ -884,4 +886,7 @@
     <string name="rsshub_bound_instance_disabled_notice">El servidor de este feed con credenciales se desactivó o eliminó. Reactiva el servidor original para la recuperación automática.</string>
     <string name="search_settings">Buscar en ajustes</string>
     <string name="no_settings_found">No se encontraron ajustes coincidentes</string>
+    <string name="article_list_style">Estilo de la lista de artículos</string>
+    <string name="article_list_style_divider">Lista con separadores</string>
+    <string name="article_list_style_segmented">Tarjetas agrupadas por día</string>
 </resources>

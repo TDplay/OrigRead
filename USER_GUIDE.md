@@ -79,6 +79,10 @@ Open an article in the timeline to start reading. If it is too short, lacks imag
 
 If the source supplies only a few lines, try fetching full text. Open the original if the result is still incomplete. The first extraction can take a moment; following a citation into an unloaded article may also need time to fetch its body.
 
+The full-text button at the top of RSS articles remembers its state per source on this device. Subsequent articles from that source, including after restarting the app, use your last choice without affecting other sources. Extraction failures do not turn it off.
+
+In Settings, search for **Article list style** to choose a continuous list with dividers or cards grouped by day. In the card view, articles from the same day share one background. The time and optional source appear above the headline; single-feed views omit the repeated source. With short previews, a three-line headline leaves room for one line of summary; shorter headlines allow up to two. Long previews and bilingual text keep their own line limits.
+
 The reader lets you mark articles read, star them, move to the previous or next article, search within the text, and adjust the reading appearance. Phones mainly use one column. Tablets and larger screens can keep lists, the article, or AI in view together as space allows.
 
 ---
@@ -213,6 +217,8 @@ Long articles are translated in batches and may take more time. AI translation a
 Tap **Share** in the reader. On first use, choose the title, article body, and any translation or summary currently open in the reader. The original URL is included.
 
 Later, a short tap reuses your choices; **long-press Share** to change them. Open a translation or summary first if you want it included. Content generated previously but not currently open is not attached.
+
+You can also edit the content and destination under **Settings → Interaction → Share → Reading page sharing**. This uses the same preferences as the reader. **Article list sharing** separately controls link sharing from article lists.
 
 OrigRead tries to preserve formatting, but the receiving app's rich-text support affects the result. Images remain external links rather than being copied as image files.
 

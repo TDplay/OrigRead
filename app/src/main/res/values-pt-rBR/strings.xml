@@ -320,6 +320,7 @@
     <string name="initial_page">Tela inicial</string>
     <string name="initial_filter">Filtro inicial</string>
     <string name="preview_article_title">Não acredito: A Espada do Amanhecer terminou</string>
+    <string name="preview_second_article_title">Uma lista de leitura para o fim de semana</string>
     <string name="preview_article_desc">Toda história chega ao fim, mas este livro me acompanhou por tanto tempo que é difícil me despedir. A trama principal terminou, mas ainda há pontas soltas. Quando será que vem uma história extra?</string>
     <string name="preview_feed_name">Biblioteca do Redemoinho</string>
     <string name="value">Valor</string>
@@ -345,6 +346,7 @@
     <string name="tips_article_list_tonal_elevation">O tom da lista de artigos só vale no tema claro</string>
     <string name="tips_group_list_tonal_elevation">O tom da lista de grupos só vale no tema claro</string>
     <string name="share">Compartilhar</string>
+    <string name="list_shared_content">Compartilhamento da lista de artigos</string>
     <string name="reading_share_config_title">Compartilhar artigos</string>
     <string name="reading_share_config_desc">Escolha o que compartilhar. O link original sempre será incluído.</string>
     <string name="reading_share_first_use_title">Configurar compartilhamento</string>
@@ -884,4 +886,7 @@
     <string name="rsshub_bound_instance_disabled_notice">O servidor deste feed com credenciais foi desativado ou removido. Reative o servidor original para recuperar automaticamente.</string>
     <string name="search_settings">Pesquisar nas configurações</string>
     <string name="no_settings_found">Nenhuma configuração encontrada</string>
+    <string name="article_list_style">Estilo da lista de artigos</string>
+    <string name="article_list_style_divider">Lista com linhas divisórias</string>
+    <string name="article_list_style_segmented">Cartões agrupados por dia</string>
 </resources>

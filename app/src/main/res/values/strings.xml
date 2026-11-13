@@ -552,6 +552,7 @@
     <string name="initial_filter">Default filter</string>
     <string
     name="preview_article_title">The novel "Lord of the Mysteries" has finally come to an end</string>
+    <string name="preview_second_article_title">A reading list for the weekend</string>
     <string
     name="preview_article_desc">The Fool is the eighth and final volume of the Lord of the Mysteries
   series
@@ -598,6 +599,7 @@
   elevation for the group list is only available in the light theme</string>
     <string name="share">
   Share</string>
+    <string name="list_shared_content">Article list sharing</string>
     <string name="reading_share_config_title">Reading page sharing</string>
     <string
     name="reading_share_config_desc">Choose what to send to note apps. The original URL is always
@@ -1515,4 +1517,7 @@
     <string name="json_repair_no_candidates">No working JSON rule was found. Check the URL and enabled rules.</string>
     <string name="search_settings">Search settings</string>
     <string name="no_settings_found">No matching settings found</string>
+    <string name="article_list_style">Article list style</string>
+    <string name="article_list_style_divider">List with dividers</string>
+    <string name="article_list_style_segmented">Cards grouped by day</string>
 </resources>

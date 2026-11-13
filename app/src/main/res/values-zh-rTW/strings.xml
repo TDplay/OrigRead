@@ -261,6 +261,7 @@
   <string name="initial_page">起始頁面</string>
   <string name="initial_filter">起始篩選條件</string>
   <string name="preview_article_title">嗚嗚嗚，黎明之劍完結了</string>
+  <string name="preview_second_article_title">週末，我想讀完這幾篇</string>
   <string name="preview_article_desc">雖然說「天下無不散的筵席」，但這本書真的陪了我好久，好捨不得！而且主線結束了坑卻沒填完，不知啥時才有番外啊。</string>
   <string name="preview_feed_name">漩渦書院</string>
   <string name="value">值</string>
@@ -286,6 +287,7 @@
   <string name="tips_article_list_tonal_elevation">文章清單色調層級僅在淺色主題下生效</string>
   <string name="tips_group_list_tonal_elevation">群組清單色調層級僅在淺色主題下生效</string>
   <string name="share">分享</string>
+  <string name="list_shared_content">列表分享內容</string>
   <string name="reading_share_config_title">閱讀頁分享</string>
   <string name="reading_share_config_desc">選擇分享內容，原文連結始終包含。</string>
   <string name="reading_share_first_use_title">設定閱讀頁分享</string>
@@ -888,4 +890,7 @@
     <string name="rsshub_bound_instance_disabled_notice">此帶憑證訂閱所屬的 RSSHub 實例已被停用或刪除。請啟用原實例後再進行自動復原。</string>
     <string name="search_settings">搜尋設定項</string>
     <string name="no_settings_found">未找到相關設定項</string>
+    <string name="article_list_style">文章列表樣式</string>
+    <string name="article_list_style_divider">分隔線列表</string>
+    <string name="article_list_style_segmented">依日期分組的卡片</string>
 </resources>

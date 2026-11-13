@@ -1,7 +1,6 @@
 package me.ash.reader.ui.page.home.flow
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -13,13 +12,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.FiberManualRecord
@@ -45,20 +40,31 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.ColorUtils
+import androidx.compose.ui.graphics.Shape
+import me.ash.reader.infrastructure.preference.FlowArticleListCardStylePreference
+import me.ash.reader.infrastructure.preference.LocalFlowArticleListCardStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.round
-import androidx.compose.ui.unit.sp
 import coil.size.Precision
 import coil.size.Scale
 import me.ash.reader.R
@@ -68,12 +74,14 @@ import me.ash.reader.infrastructure.preference.FlowArticleListDescPreference
 import me.ash.reader.infrastructure.preference.FlowArticleReadIndicatorPreference
 import me.ash.reader.infrastructure.preference.LocalArticleListSwipeEndAction
 import me.ash.reader.infrastructure.preference.LocalArticleListSwipeStartAction
+import me.ash.reader.infrastructure.preference.LocalBasicFonts
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListDesc
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListFeedIcon
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListFeedName
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListImage
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListReadIndicator
 import me.ash.reader.infrastructure.preference.LocalFlowArticleListTime
+import me.ash.reader.infrastructure.preference.LocalFlowArticleListTonalElevation
 import me.ash.reader.infrastructure.preference.SwipeEndActionPreference
 import me.ash.reader.infrastructure.preference.SwipeStartActionPreference
 import me.ash.reader.ui.component.FeedIcon
@@ -83,55 +91,92 @@ import me.ash.reader.ui.component.menu.AnimatedDropdownMenu
 import me.ash.reader.ui.component.swipe.SwipeAction
 import me.ash.reader.ui.component.swipe.SwipeableActionsBox
 import me.ash.reader.ui.ext.requiresBidi
-import me.ash.reader.ui.ext.surfaceColorAtElevation
 import me.ash.reader.ui.page.settings.color.flow.generateArticleWithFeedPreview
-import me.ash.reader.ui.theme.Shape20
 import me.ash.reader.ui.theme.applyTextDirection
-import me.ash.reader.ui.theme.palette.onDark
 
-private const val TAG = "ArticleItem"
+private val ArticleCardShape = RoundedCornerShape(16.dp)
+private val ThumbnailShape = RoundedCornerShape(8.dp)
+private val CardInset = 12.dp
+private val ThumbnailSize = 76.dp
+
+private val ArticleGroupStart = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+private val ArticleGroupEnd = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+
+private fun articleGroupShape(hasPrevious: Boolean, hasNext: Boolean): Shape = when {
+    !hasPrevious && !hasNext -> ArticleCardShape
+    !hasPrevious -> ArticleGroupStart
+    !hasNext -> ArticleGroupEnd
+    else -> RectangleShape
+}
+
+private data class ArticleRowData(
+    val feedName: String,
+    val feedIconUrl: String?,
+    val title: String,
+    val shortDescription: String,
+    val translatedTitle: String?,
+    val translatedDescription: String?,
+    val time: String?,
+    val image: Any?,
+    val starred: Boolean,
+    val unread: Boolean,
+)
+
+@Composable
+private fun ArticleWithFeed.rowData(
+    isUnread: Boolean,
+    translation: ListTranslationResult?,
+): ArticleRowData {
+    val includeDescription = LocalFlowArticleListDesc.current != FlowArticleListDescPreference.NONE
+    // A cached translation belongs to the exact source text currently in the list.
+    val visible = translation?.takeIf {
+        it.showTranslation && it.isFresh() && it.source == ListTranslationInput.of(
+            article.accountId, article.id, article.title,
+            if (includeDescription) article.shortDescription else "", article.feedId,
+        )
+    }
+    return ArticleRowData(
+        feedName = feed.name,
+        feedIconUrl = feed.icon,
+        title = article.title,
+        shortDescription = article.shortDescription,
+        translatedTitle = visible?.title?.takeIf(String::isNotBlank),
+        translatedDescription = visible?.description?.takeIf(String::isNotBlank),
+        time = article.dateString,
+        image = article.img,
+        starred = article.isStarred,
+        unread = isUnread,
+    )
+}
 
 @Composable
 fun ArticleItem(
     modifier: Modifier = Modifier,
     articleWithFeed: ArticleWithFeed,
     isUnread: Boolean = articleWithFeed.article.isUnread,
+    cardStyle: FlowArticleListCardStylePreference = LocalFlowArticleListCardStyle.current,
+    cardShape: Shape = ArticleCardShape,
     translation: ListTranslationResult? = null,
     translationDisplayMode: TranslationDisplayMode = TranslationDisplayMode.TRANSLATED,
     translationRevealRevision: Int = 0,
+    isSingleFeed: Boolean = false,
     onClick: (ArticleWithFeed) -> Unit = {},
     onLongClick: (() -> Unit)? = null,
 ) {
-    val feed = articleWithFeed.feed
-    val article = articleWithFeed.article
-
-    // 来源内容或摘要显示设置变化后，旧译文不得套到新文字上；点击/分享始终传原 Article。
-    val includeDescription = LocalFlowArticleListDesc.current != FlowArticleListDescPreference.NONE
-    val visibleTranslation = translation?.takeIf {
-        it.showTranslation && it.isFresh() && it.source == ListTranslationInput.of(article.accountId, article.id, article.title,
-            if (includeDescription) article.shortDescription else "", article.feedId)
+    ArticleItemFrame(modifier, cardStyle, cardShape) { background ->
+        ArticleRowContent(
+            data = articleWithFeed.rowData(isUnread, translation),
+            cardStyle = cardStyle,
+            background = background,
+            isSingleFeed = isSingleFeed,
+            bilingual = translationDisplayMode == TranslationDisplayMode.BILINGUAL,
+            translationRevealRevision = translationRevealRevision,
+            onClick = { onClick(articleWithFeed) },
+            onLongClick = onLongClick,
+        )
     }
-
-    ArticleItem(
-        modifier = modifier,
-        feedName = feed.name,
-        feedIconUrl = feed.icon,
-        title = article.title,
-        shortDescription = article.shortDescription,
-        translatedTitle = visibleTranslation?.title?.takeIf(String::isNotBlank),
-        translatedDescription = visibleTranslation?.description?.takeIf(String::isNotBlank),
-        bilingual = translationDisplayMode == TranslationDisplayMode.BILINGUAL,
-        translationRevealRevision = translationRevealRevision,
-        timeString = article.dateString,
-        imgData = article.img,
-        isStarred = article.isStarred,
-        isUnread = isUnread,
-        onClick = { onClick(articleWithFeed) },
-        onLongClick = onLongClick,
-    )
 }
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ArticleItem(
     modifier: Modifier = Modifier,
@@ -147,192 +192,283 @@ fun ArticleItem(
     imgData: Any? = null,
     isStarred: Boolean = false,
     isUnread: Boolean = false,
+    cardStyle: FlowArticleListCardStylePreference = FlowArticleListCardStylePreference.Divider,
+    cardShape: Shape = ArticleCardShape,
+    isSingleFeed: Boolean = false,
     onClick: () -> Unit = {},
     onLongClick: (() -> Unit)? = null,
 ) {
-    val articleListFeedIcon = LocalFlowArticleListFeedIcon.current
-    val articleListFeedName = LocalFlowArticleListFeedName.current
-    val articleListImage = LocalFlowArticleListImage.current
-    val articleListDesc = LocalFlowArticleListDesc.current
-    val articleListDate = LocalFlowArticleListTime.current
-    val articleListReadIndicator = LocalFlowArticleListReadIndicator.current
-    var imageLoadFailed by remember(imgData) { mutableStateOf(false) }
-    val titleTypography = MaterialTheme.typography.titleMedium
-    val displayTitle = if (bilingual) title else translatedTitle ?: title
-    val displayDescription = if (bilingual) shortDescription else translatedDescription ?: shortDescription
-    val translationModeAlpha = me.ash.reader.ui.motion.rememberOrigReadContentAlpha(bilingual to translationRevealRevision)
-    val titleStyle = remember(displayTitle, titleTypography) {
-        titleTypography
-            .applyTextDirection(displayTitle.requiresBidi())
-            .merge(lineHeight = 22.sp)
+    ArticleItemFrame(modifier, cardStyle, cardShape) { background ->
+        ArticleRowContent(
+            data = ArticleRowData(
+                feedName, feedIconUrl, title, shortDescription,
+                translatedTitle, translatedDescription, timeString, imgData, isStarred, isUnread,
+            ),
+            cardStyle = cardStyle,
+            background = background,
+            isSingleFeed = isSingleFeed,
+            bilingual = bilingual,
+            translationRevealRevision = translationRevealRevision,
+            onClick = onClick,
+            onLongClick = onLongClick,
+        )
     }
-    val readAlpha = animateFloatAsState(
-        targetValue = when (articleListReadIndicator) {
-            FlowArticleReadIndicatorPreference.None -> 1f
-            FlowArticleReadIndicatorPreference.AllRead -> if (isUnread) 1f else 0.5f
-            FlowArticleReadIndicatorPreference.ExcludingStarred -> if (isUnread || isStarred) 1f else 0.5f
-        },
-        animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
-        label = "article_read_alpha",
+}
+
+@Composable
+private fun ArticleItemFrame(
+    modifier: Modifier,
+    cardStyle: FlowArticleListCardStylePreference,
+    cardShape: Shape,
+    articleListTonalElevation: Int = LocalFlowArticleListTonalElevation.current.value,
+    content: @Composable (Color) -> Unit,
+) {
+    val fill = if (cardStyle == FlowArticleListCardStylePreference.Segmented) articleListCardColor()
+        else articleListBackgroundColor(cardStyle, articleListTonalElevation)
+    val background = fill.compositeOver(MaterialTheme.colorScheme.surface.copy(alpha = 1f))
+    if (cardStyle == FlowArticleListCardStylePreference.Segmented) {
+        Surface(
+            modifier = modifier.fillMaxWidth().padding(horizontal = CardInset),
+            shape = cardShape,
+            color = background,
+        ) { content(background) }
+    } else {
+        Box(modifier.fillMaxWidth().background(background)) { content(background) }
+    }
+}
+
+internal data class ArticleSupportingColors(val summary: Color, val metadata: Color)
+
+/** Use the actual row fill, including its tonal elevation. Keep high-contrast palettes strong
+ * by stepping back a fixed amount of contrast rather than capping every theme at the minimum. */
+internal fun articleSupportingColors(background: Color, onSurfaceVariant: Color, onSurface: Color): ArticleSupportingColors {
+    val bg = background.toArgb()
+    val variant = ColorUtils.compositeColors(onSurfaceVariant.toArgb(), bg)
+    val strong = ColorUtils.compositeColors(onSurface.toArgb(), bg)
+    val baseContrast = ColorUtils.calculateContrast(variant, bg).toFloat()
+    fun tone(floor: Float, reduction: Float): Color {
+        val target = maxOf(floor, baseContrast - reduction)
+        val ink = when {
+            baseContrast >= target -> variant
+            ColorUtils.calculateContrast(strong, bg) >= target -> strong
+            ColorUtils.calculateContrast(Color.Black.toArgb(), bg) >
+                ColorUtils.calculateContrast(Color.White.toArgb(), bg) -> Color.Black.toArgb()
+            else -> Color.White.toArgb()
+        }
+        val alpha = ColorUtils.calculateMinimumAlpha(ink, bg, target)
+        return if (alpha < 0) Color(ink)
+        else Color(ColorUtils.compositeColors(ColorUtils.setAlphaComponent(ink, alpha), bg))
+    }
+    return ArticleSupportingColors(summary = tone(4.9f, 1.2f), metadata = tone(4.5f, 2.8f))
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ArticleRowContent(
+    data: ArticleRowData,
+    cardStyle: FlowArticleListCardStylePreference,
+    background: Color,
+    isSingleFeed: Boolean,
+    bilingual: Boolean,
+    translationRevealRevision: Int,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
+    hasPreviousArticleInGroup: Boolean = false,
+    hasNextArticleInGroup: Boolean = false,
+) {
+    val descriptionLines = when (LocalFlowArticleListDesc.current) {
+        FlowArticleListDescPreference.NONE -> 0
+        FlowArticleListDescPreference.SHORT -> 2
+        FlowArticleListDescPreference.LONG -> 4
+    }
+    val title = if (bilingual) data.title else data.translatedTitle ?: data.title
+    val description = if (bilingual) data.shortDescription else data.translatedDescription ?: data.shortDescription
+    val secondTitle = data.translatedTitle?.takeIf { bilingual && it.isNotBlank() && it != title }
+    val secondDescription = data.translatedDescription?.takeIf { bilingual && it.isNotBlank() && it != description }
+    val hasDescription = descriptionLines > 0 && (description.isNotBlank() || secondDescription != null)
+    val titleLines = if (hasDescription) 3 else 4
+    val muted = !data.unread && when (LocalFlowArticleListReadIndicator.current) {
+        FlowArticleReadIndicatorPreference.None -> false
+        FlowArticleReadIndicatorPreference.AllRead -> true
+        FlowArticleReadIndicatorPreference.ExcludingStarred -> !data.starred
+    }
+    val colors = MaterialTheme.colorScheme
+    val themeTitle = MaterialTheme.typography.titleMedium
+    val titleStyle = themeTitle.copy(
+        fontSize = themeTitle.fontSize * (18f / 16f),
+        lineHeight = themeTitle.lineHeight * (23f / 24f),
+        fontWeight = if (muted) FontWeight.Normal else FontWeight.SemiBold,
     )
-
+    val titleColor = if (muted) colors.onSurfaceVariant else colors.onSurface
+    val supporting = remember(background, colors.onSurfaceVariant, colors.onSurface) {
+        articleSupportingColors(background, colors.onSurfaceVariant, colors.onSurface)
+    }
+    var imageFailed by remember(data.image) { mutableStateOf(false) }
+    val showImage = LocalFlowArticleListImage.current.value && hasUsableArticleImage(data.image) && !imageFailed
+    val contentAlpha = me.ash.reader.ui.motion.rememberOrigReadContentAlpha(bilingual to translationRevealRevision)
+    val isCard = cardStyle == FlowArticleListCardStylePreference.Segmented
+    val inset = if (isCard) CardInset else ArticleListContentInset
+    // A bilingual preference alone doesn't add a second copy (for example before a translation arrives).
+    val dynamicShort = descriptionLines == 2 && hasDescription && secondTitle == null && secondDescription == null
     Column(
-        modifier =
-            modifier
-                .padding(horizontal = 12.dp)
-                .clip(Shape20)
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = 12.dp, vertical = 12.dp)
-                .graphicsLayer { alpha = readAlpha.value }
+        modifier = Modifier.fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(
+                start = inset, end = inset,
+                top = when {
+                    !isCard -> 16.dp
+                    !hasPreviousArticleInGroup -> CardInset
+                    else -> 14.dp
+                },
+                bottom = if (isCard && !hasNextArticleInGroup) CardInset else 14.dp,
+            ),
     ) {
-        // Top
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        ArticleTextWithThumbnail(
+            image = if (showImage) data.image else null,
+            onError = { imageFailed = true },
         ) {
-            // Feed name
-            if (articleListFeedName.value) {
-                Text(
-                    modifier =
-                        Modifier.weight(1f)
-                            .padding(
-                                start = if (articleListFeedIcon.value) 30.dp else 0.dp,
-                                end = 10.dp,
-                            ),
-                    text = feedName,
-                    color = MaterialTheme.colorScheme.tertiary,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier) {
-                    // Starred
-                    StarredIndicator(isStarred)
-
-                    if (articleListDate.value) {
-                        // Time
-                        Text(
-                            modifier = Modifier,
-                            text = timeString ?: "",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(if (articleListFeedIcon.value) 30.dp else 0.dp))
-
-                    if (articleListDate.value) {
-                        // Time
-                        Text(
-                            modifier = Modifier.weight(1f),
-                            text = timeString ?: "",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        // Starred
-                        StarredIndicator(isStarred)
-                    }
-                }
-            }
-
-            // Right
-
-        }
-
-        // Bottom
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            // Feed icon
-            if (articleListFeedIcon.value) {
-                FeedIcon(feedName = feedName, iconUrl = feedIconUrl)
-                Spacer(modifier = Modifier.width(10.dp))
-            }
-
-            // Article
-            Column(modifier = Modifier.weight(1f).graphicsLayer { alpha = translationModeAlpha.value }) {
-
-                // Title
-                Row {
-                    Text(
-                        text = displayTitle,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = titleStyle,
-                        maxLines =
-                            if (articleListDesc != FlowArticleListDescPreference.NONE) 2 else 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (!articleListFeedName.value && !articleListDate.value) {
-                        StarredIndicator(isStarred)
-                    }
-                }
-
-                // 对照标题独占行数，不与原文共用一个 Text 的省略范围。
-                if (bilingual && !translatedTitle.isNullOrBlank() && translatedTitle != title) {
-                    Text(
-                        text = translatedTitle, modifier = Modifier.padding(top = 4.dp),
-                        style = titleTypography.applyTextDirection(translatedTitle.requiresBidi()).merge(lineHeight = 22.sp),
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = if (articleListDesc != FlowArticleListDescPreference.NONE) 2 else 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                // Description
-                if (
-                    articleListDesc != FlowArticleListDescPreference.NONE &&
-                        displayDescription.isNotBlank()
-                ) {
-                    val bodySmallTypography = MaterialTheme.typography.bodySmall
-                    val descriptionStyle = remember(
-                        displayDescription,
-                        bodySmallTypography,
-                    ) {
-                        bodySmallTypography.applyTextDirection(
-                            displayDescription.requiresBidi()
-                        )
-                    }
-                    Text(
-                        modifier = Modifier.padding(top = 4.dp),
-                        text = displayDescription,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = descriptionStyle,
-                        maxLines =
-                            when (articleListDesc) {
-                                FlowArticleListDescPreference.LONG -> 4
-                                FlowArticleListDescPreference.SHORT -> 2
-                                else -> throw IllegalStateException()
+            Column(Modifier.fillMaxWidth()) {
+                ArticleMetadata(data, isSingleFeed, supporting.metadata)
+                Column(Modifier.fillMaxWidth().graphicsLayer { alpha = contentAlpha.value }) {
+                    if (dynamicShort) {
+                        BudgetedArticleCopy(
+                            title = { measured ->
+                                ArticleTitle(title, titleStyle, titleColor, titleLines, muted, onTextLayout = measured)
                             },
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (bilingual && !translatedDescription.isNullOrBlank() && translatedDescription != shortDescription) {
-                        Text(
-                            text = translatedDescription, modifier = Modifier.padding(top = 4.dp),
-                            style = bodySmallTypography.applyTextDirection(translatedDescription.requiresBidi()),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = if (articleListDesc == FlowArticleListDescPreference.LONG) 4 else 2,
-                            overflow = TextOverflow.Ellipsis,
+                            summary = { lines ->
+                                ArticleRowText(description, MaterialTheme.typography.bodyMedium, supporting.summary,
+                                    lines, Modifier.padding(top = 6.dp))
+                            },
                         )
+                    } else {
+                        ArticleTitle(title, titleStyle, titleColor, titleLines, muted)
+                        if (secondTitle != null) {
+                            ArticleTitle(secondTitle, titleStyle, titleColor, titleLines, muted, Modifier.padding(top = 4.dp))
+                        }
+                        if (hasDescription && description.isNotBlank()) {
+                            ArticleRowText(description, MaterialTheme.typography.bodyMedium, supporting.summary,
+                                descriptionLines, Modifier.padding(top = 6.dp))
+                        }
+                        if (hasDescription && secondDescription != null) {
+                            ArticleRowText(secondDescription, MaterialTheme.typography.bodyMedium, supporting.summary,
+                                descriptionLines, Modifier.padding(top = if (description.isBlank()) 6.dp else 4.dp))
+                        }
                     }
                 }
             }
-
-            // Image
-            if (hasUsableArticleImage(imgData) && articleListImage.value && !imageLoadFailed) {
-                OrigReadAsyncImage(
-                    modifier = Modifier.padding(start = 10.dp).size(80.dp).clip(Shape20),
-                    data = imgData,
-                    scale = Scale.FILL,
-                    precision = Precision.INEXACT,
-                    size = SIZE_1000,
-                    contentScale = ContentScale.Crop,
-                    onError = { imageLoadFailed = true },
-                )
-            }
         }
+    }
+}
+
+@Composable
+private fun ArticleTitle(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    maxLines: Int,
+    muted: Boolean,
+    modifier: Modifier = Modifier,
+    onTextLayout: (TextLayoutResult) -> Unit = {},
+) {
+    val basicFonts = LocalBasicFonts.current
+    Text(
+        text = remember(text, basicFonts, muted) { articleTitleText(text, basicFonts, muted) },
+        modifier = modifier,
+        style = remember(text, style) { style.applyTextDirection(text.requiresBidi()) },
+        color = color,
+        maxLines = maxLines,
+        onTextLayout = onTextLayout,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun ArticleTextWithThumbnail(
+    image: Any?,
+    onError: () -> Unit,
+    text: @Composable () -> Unit,
+) {
+    if (image == null) {
+        text()
+        return
+    }
+    // Reserve a bounded width once. The thumbnail follows the measured copy height, never the reverse.
+    Layout(
+        modifier = Modifier.fillMaxWidth(),
+        content = {
+            text()
+            OrigReadAsyncImage(
+                data = image,
+                scale = Scale.FIT,
+                precision = Precision.INEXACT,
+                size = SIZE_1000,
+                fittedShape = ThumbnailShape,
+                onError = onError,
+            )
+        },
+    ) { measurables, constraints ->
+        val maxEdge = minOf(ThumbnailSize.roundToPx(), constraints.maxWidth / 4, constraints.maxHeight)
+        val gap = minOf(12.dp.roundToPx(), constraints.maxWidth - maxEdge)
+        val reserved = maxEdge + gap
+        val copy = measurables[0].measure(constraints.copy(
+            minWidth = (constraints.minWidth - reserved).coerceAtLeast(0),
+            maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth - reserved else Constraints.Infinity,
+            minHeight = 0,
+        ))
+        // Long copy must never turn the thumbnail into a portrait crop; short copy can shrink the slot.
+        val side = minOf(maxEdge, copy.height)
+        val picture = measurables[1].measure(Constraints.fixed(side, side))
+        val width = copy.width + reserved
+        val height = maxOf(copy.height, constraints.minHeight)
+        layout(width, height) {
+            copy.placeRelative(0, (height - copy.height) / 2)
+            picture.placeRelative(width - picture.width, (height - picture.height) / 2)
+        }
+    }
+}
+
+@Composable
+private fun ArticleRowText(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    maxLines: Int,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = remember(text, style) { style.applyTextDirection(text.requiresBidi()) },
+        color = color,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun ArticleMetadata(data: ArticleRowData, isSingleFeed: Boolean, color: Color) {
+    val showIcon = !isSingleFeed && LocalFlowArticleListFeedIcon.current.value &&
+        (data.feedName.isNotBlank() || !data.feedIconUrl.isNullOrBlank())
+    val showName = !isSingleFeed && LocalFlowArticleListFeedName.current.value && data.feedName.isNotBlank()
+    val showTime = LocalFlowArticleListTime.current.value
+    val time = data.time?.takeIf { showTime && it.isNotBlank() }
+    if (!showIcon && !showName && time == null && !data.starred) return
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (showIcon) FeedIcon(feedName = data.feedName, iconUrl = data.feedIconUrl, size = 14.dp)
+        if (showName) {
+            ArticleRowText(data.feedName, MaterialTheme.typography.labelMedium,
+                color, 1, Modifier.weight(1f, fill = false))
+        }
+        if (time != null) {
+            ArticleRowText(if (showName) "· $time" else time,
+                MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium), color, 1)
+        }
+        if (data.starred) StarredIndicator(true)
     }
 }
 
@@ -370,18 +506,19 @@ private fun StarredIndicator(visible: Boolean) {
     }
 }
 
-private const val PositionalThresholdFraction = 0.4f
-private const val SwipeActionDelay = 300L
-
 @Composable
 fun SwipeableArticleItem(
     modifier: Modifier = Modifier,
     articleWithFeed: ArticleWithFeed,
     isUnread: Boolean = articleWithFeed.article.isUnread,
     articleListTonalElevation: Int = 0,
+    hasNextArticleInGroup: Boolean = false,
+    hasPreviousArticleInGroup: Boolean = false,
+    cardStyle: FlowArticleListCardStylePreference = LocalFlowArticleListCardStyle.current,
     translation: ListTranslationResult? = null,
     translationDisplayMode: TranslationDisplayMode = TranslationDisplayMode.TRANSLATED,
     translationRevealRevision: Int = 0,
+    isSingleFeed: Boolean = false,
     onClick: (ArticleWithFeed) -> Unit = {},
     isSwipeEnabled: () -> Boolean = { false },
     isMenuEnabled: Boolean = true,
@@ -391,75 +528,68 @@ fun SwipeableArticleItem(
     onMarkBelowAsRead: ((ArticleWithFeed) -> Unit)? = null,
     onShare: ((ArticleWithFeed) -> Unit)? = null,
 ) {
+    val article = articleWithFeed.article
+    var isMenuExpanded by remember(article.id, isMenuEnabled) { mutableStateOf(false) }
+    var menuOffset by remember(article.id) { mutableStateOf(IntOffset.Zero) }
+    val isCard = cardStyle == FlowArticleListCardStylePreference.Segmented
+    val shape = articleGroupShape(hasPreviousArticleInGroup, hasNextArticleInGroup)
 
-    var isMenuExpanded by remember { mutableStateOf(false) }
-
-    val onLongClick =
-        if (isMenuEnabled) {
-            { isMenuExpanded = true }
-        } else {
-            null
-        }
-    var menuOffset by remember { mutableStateOf(IntOffset.Zero) }
-
-    SwipeActionBox(
-        modifier = modifier,
-        articleWithFeed = articleWithFeed,
-        isRead = !isUnread,
-        isStarred = articleWithFeed.article.isStarred,
-        onToggleStarred = onToggleStarred,
-        onToggleRead = onToggleRead,
-    ) {
-        Box(
-            modifier =
-                Modifier.fillMaxSize()
-                    .pointerInput(isMenuExpanded) {
+    ArticleItemFrame(modifier, cardStyle, shape, articleListTonalElevation) { background ->
+        Column(Modifier.fillMaxWidth()) {
+            SwipeActionBox(
+                articleWithFeed = articleWithFeed,
+                isRead = !isUnread,
+                isStarred = article.isStarred,
+                onToggleStarred = onToggleStarred,
+                onToggleRead = onToggleRead,
+            ) {
+                val menuAnchor = if (isMenuEnabled) {
+                    Modifier.pointerInput(article.id) {
                         awaitEachGesture {
-                            while (true) {
-                                awaitFirstDown(requireUnconsumed = false).let {
-                                    menuOffset = it.position.round()
-                                }
-                            }
+                            menuOffset = awaitFirstDown(requireUnconsumed = false).position.round()
                         }
                     }
-                    .background(
-                        MaterialTheme.colorScheme.surfaceColorAtElevation(
-                            articleListTonalElevation.dp
-                        ) onDark MaterialTheme.colorScheme.surface
+                } else Modifier
+                Box(Modifier.fillMaxWidth().background(background).then(menuAnchor)) {
+                    ArticleRowContent(
+                        data = articleWithFeed.rowData(isUnread, translation),
+                        cardStyle = cardStyle,
+                        background = background,
+                        isSingleFeed = isSingleFeed,
+                        bilingual = translationDisplayMode == TranslationDisplayMode.BILINGUAL,
+                        translationRevealRevision = translationRevealRevision,
+                        hasPreviousArticleInGroup = hasPreviousArticleInGroup,
+                        hasNextArticleInGroup = hasNextArticleInGroup,
+                        onClick = { onClick(articleWithFeed) },
+                        onLongClick = if (isMenuEnabled) ({ isMenuExpanded = true }) else null,
                     )
-                    .wrapContentSize()
-        ) {
-            ArticleItem(
-                articleWithFeed = articleWithFeed,
-                isUnread = isUnread,
-                translation = translation,
-                translationDisplayMode = translationDisplayMode,
-                translationRevealRevision = translationRevealRevision,
-                onClick = onClick,
-                onLongClick = onLongClick,
-            )
-            with(articleWithFeed.article) {
-                if (isMenuEnabled) {
-                    AnimatedDropdownMenu(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        expanded = isMenuExpanded,
-                        onDismissRequest = { isMenuExpanded = false },
-                        offset = menuOffset,
-                    ) {
-                        ArticleItemMenuContent(
-                            articleWithFeed = articleWithFeed,
-                            isStarred = isStarred,
-                            isRead = !isUnread,
-                            onToggleStarred = onToggleStarred,
-                            onToggleRead = onToggleRead,
-                            onMarkAboveAsRead = onMarkAboveAsRead,
-                            onMarkBelowAsRead = onMarkBelowAsRead,
-                            onShare = onShare,
+                    if (isMenuEnabled) {
+                        AnimatedDropdownMenu(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            expanded = isMenuExpanded,
+                            onDismissRequest = { isMenuExpanded = false },
+                            offset = menuOffset,
                         ) {
-                            isMenuExpanded = false
+                            ArticleItemMenuContent(
+                                articleWithFeed = articleWithFeed,
+                                isStarred = article.isStarred,
+                                isRead = !isUnread,
+                                onToggleStarred = onToggleStarred,
+                                onToggleRead = onToggleRead,
+                                onMarkAboveAsRead = onMarkAboveAsRead,
+                                onMarkBelowAsRead = onMarkBelowAsRead,
+                                onShare = onShare,
+                            ) { isMenuExpanded = false }
                         }
                     }
                 }
+            }
+            if (hasNextArticleInGroup) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = if (isCard) CardInset else ArticleListContentInset),
+                    thickness = with(LocalDensity.current) { 1f.toDp() },
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
             }
         }
     }

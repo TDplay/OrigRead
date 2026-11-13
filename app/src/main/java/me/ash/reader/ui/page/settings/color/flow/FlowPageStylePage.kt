@@ -39,6 +39,7 @@ fun FlowPageStylePage(
     val articleListTonalElevation = LocalFlowArticleListTonalElevation.current
     val articleListReadIndicator = LocalFlowArticleListReadIndicator.current
     val sortUnreadArticles = LocalSortUnreadArticles.current
+    val articleListCardStyle = LocalFlowArticleListCardStyle.current
 
     val settings = LocalSettings.current
     val pullToSwitchFeed = settings.pullToSwitchFeed
@@ -57,6 +58,7 @@ fun FlowPageStylePage(
     var showSortUnreadArticlesDialog by remember { mutableStateOf(false) }
 
     var filterBarPaddingValue: Int? by remember { mutableStateOf(filterBarPadding) }
+    var articleListCardStyleDialogVisible by remember { mutableStateOf(false) }
 
     OrigReadScaffold(
         containerColor = MaterialTheme.colorScheme.surface onLight MaterialTheme.colorScheme.inverseOnSurface,
@@ -74,7 +76,16 @@ fun FlowPageStylePage(
                     DisplayText(text = stringResource(R.string.flow_page), desc = "")
                 }
 
-                // Preview
+                // Keep the selector beside the preview it changes.
+                item {
+                    SettingItem(
+                        title = stringResource(R.string.article_list_style),
+                        desc = articleListCardStyle.description,
+                        onClick = {
+                            articleListCardStyleDialogVisible = true
+                        },
+                    ) {}
+                }
                 item {
                     Row(
                         modifier = Modifier
@@ -84,8 +95,7 @@ fun FlowPageStylePage(
                             .background(
                                 MaterialTheme.colorScheme.inverseOnSurface
                                         onLight MaterialTheme.colorScheme.surface.copy(0.7f)
-                            )
-                            .clickable { },
+                            ),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -256,6 +266,22 @@ fun FlowPageStylePage(
                     Spacer(modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
                 }
             }
+        }
+    )
+
+    RadioDialog(
+        visible = articleListCardStyleDialogVisible,
+        title = stringResource(R.string.article_list_style),
+        options = FlowArticleListCardStylePreference.values.map {
+            RadioDialogOption(
+                text = it.description,
+                selected = it == articleListCardStyle,
+            ) {
+                it.put(context, scope)
+            }
+        },
+        onDismissRequest = {
+            articleListCardStyleDialogVisible = false
         }
     )
 

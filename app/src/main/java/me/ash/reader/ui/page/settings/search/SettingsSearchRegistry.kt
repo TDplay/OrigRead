@@ -456,6 +456,17 @@ object SettingsSearchRegistry {
         )
         add(
             SettingsSearchItem(
+                id = "article_list_style",
+                titleRes = R.string.article_list_style,
+                breadcrumbsRes = listOf(R.string.settings, R.string.interaction, R.string.article_list),
+                route = Route.Interaction,
+                icon = Icons.Outlined.TouchApp,
+                keywords = listOf("文章列表样式", "分隔线列表", "按日分组卡片", "依日期分組", "cards grouped by day", "独立卡片", "分隔線", "獨立卡片", "list with dividers", "individual cards",
+                    "分段卡片", "分割线", "内缩分割线", "卡片样式", "呼吸缝", "Expressive", "card style", "divider"),
+            )
+        )
+        add(
+            SettingsSearchItem(
                 id = "swipe_to_start",
                 titleRes = R.string.swipe_to_start,
                 breadcrumbsRes = listOf(R.string.settings, R.string.interaction, R.string.article_list),
@@ -537,11 +548,22 @@ object SettingsSearchRegistry {
         add(
             SettingsSearchItem(
                 id = "shared_content",
-                titleRes = R.string.shared_content,
+                titleRes = R.string.list_shared_content,
                 breadcrumbsRes = listOf(R.string.settings, R.string.interaction, R.string.share),
                 route = Route.Interaction,
                 icon = Icons.Outlined.TouchApp,
-                keywords = listOf("分享内容", "分享格式", "带标题", "带链接"),
+                keywords = listOf("分享内容", "分享格式", "带标题", "带链接", "列表分享"),
+            )
+        )
+        add(
+            SettingsSearchItem(
+                id = "reading_share",
+                titleRes = R.string.reading_share_config_title,
+                descRes = R.string.reading_share_config_desc,
+                breadcrumbsRes = listOf(R.string.settings, R.string.interaction, R.string.share),
+                route = Route.Interaction,
+                icon = Icons.Outlined.TouchApp,
+                keywords = listOf("分享内容", "分享目标", "正文", "译文", "摘要", "Obsidian", "SiYuan", "Logseq", "Notion"),
             )
         )
 
